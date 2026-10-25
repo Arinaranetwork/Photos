@@ -17,20 +17,46 @@ app/build
 .externalNativeBuild
 .cxx
 
-# Source code & internal build configuration (Public repo tracks only builds & description)
+# Source code, tests & internal build configuration (Public repo tracks only compiled builds & public description)
 /app/
+/Src/
+/src/
+/Tests/
+/tests/
 /gradle/
+*.kt
+*.kts
+*.java
+*.pro
+*.aidl
+AndroidManifest.xml
+build.gradle
 build.gradle.kts
+settings.gradle
 settings.gradle.kts
 gradle.properties
 gradlew
 gradlew.bat
 
-# Internal documentation & agent configuration
+# Internal documentation, progress, roadmap, specs & agent configuration (Never upload to public git)
 /.agents/
+/.agent/
+/.gemini/
+/.cursor/
+/.claude/
 /Docs/
+/docs/
 Rules.md
 Android.md
+Codex.md
+Progress.md
+Anchor.md
+*Progress*.md
+*Roadmap*.md
+*Blueprint*.md
+*Codex*.md
+*Phase*.md
+*Anchor*.md
 .env.Example
 
 # Intermediate build outputs (Never ignore /Output/Release)

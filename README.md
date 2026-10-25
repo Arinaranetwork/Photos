@@ -20,7 +20,7 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 
 <br />
 
-<img src="Assets/Banners/PhotosBanner_1.2_2026-10-25.svg" alt="Photos 1.2 Banner" width="100%" />
+<img src="Assets/Banners/PhotosBanner_1.3_2026-10-25.svg" alt="Photos 1.3 Banner" width="100%" />
 
 <p align="center">
   <i>Built on the borderless Arinara Electric Slate design system (#0D1117 canvas, #161C26 surfaces, #7A5AF8 electric violet) with universal spring physics and zero cloud telemetry.</i>
@@ -103,33 +103,34 @@ All official compiled Android packages (`APK`) and their `SHA-256` verification 
 
 | Version | Channel | Release Artifact | Highlights |
 |:---|:---|:---|:---|
-| **`v1.2.1`** *(Latest)* | **Beta / Stable** | [`Photos_1.2.1_Beta_Android.apk`](Output/Release/Photos_1.2.1_Beta_Android.apk)<br/>[`Photos_1.2.1_Android.apk`](Output/Release/Photos_1.2.1_Android.apk) | Real LAME 3.98.4 MP3 encoder & scoped storage video audio extraction, persistent System PiP on app minimize, source-bound resolution/FPS filtering, decluttered UI labels |
+| **`v1.3.0`** *(Latest)* | **Stable / Beta** | [`Photos_1.3.0_Android.apk`](Output/Release/Photos_1.3.0_Android.apk)<br/>[`Photos_1.3.0_Beta_Android.apk`](Output/Release/Photos_1.3.0_Beta_Android.apk) | Real-Time PCM Audio DSP (`10-band Parametric EQ`, `M/S Width`, `Crossfeed`, `Warmth`, `Sub-Bass`, `Balance`, `Limiter`), Counted Repeat (`Off`, `1x`, `2x`, `3x`, `5x`, `Track`, `Queue`, `A-B`), Video Editor & Frame Thumbnails, Media Notification, Lag-Free Queue, Hierarchical Back Navigation |
+| **`v1.2.1`** | **Beta / Stable** | [`Photos_1.2.1_Beta_Android.apk`](Output/Release/Photos_1.2.1_Beta_Android.apk)<br/>[`Photos_1.2.1_Android.apk`](Output/Release/Photos_1.2.1_Android.apk) | Real LAME 3.98.4 MP3 encoder & scoped storage video audio extraction, persistent System PiP on app minimize, source-bound resolution/FPS filtering, decluttered UI labels |
 | **`v1.2.0`** | **Beta / Stable** | [`Photos_1.2.0_Beta_Android.apk`](Output/Release/Photos_1.2.0_Beta_Android.apk)<br/>[`Photos_1.2.0_Android.apk`](Output/Release/Photos_1.2.0_Android.apk) | Video-to-MP3/M4A/WAV converter, on-demand multi-res/FPS video transcoder, universal `"Share to..."`, auto-scrolling `.LRC` lyrics stamper & 30s sleep fade-out |
 | **`v1.1.2`** | **Beta** | [`Photos_1.1.2_Beta_Android.apk`](Output/Release/Photos_1.1.2_Beta_Android.apk) | 60fps LUT photo editor pipeline, native system video brightness preservation, PiP mode, first-time Vault password setup |
 | **`v1.1.1`** | **Beta / Stable** | [`Photos_1.1.1_Beta_Android.apk`](Output/Release/Photos_1.1.1_Beta_Android.apk)<br/>[`Photos_1.1.1_Android.apk`](Output/Release/Photos_1.1.1_Android.apk) | Updated dual-mountain emblem launcher icon across all adaptive and legacy densities |
 | **`v1.1.0`** | **Beta / Stable** | [`Photos_1.1.0_Beta_Android.apk`](Output/Release/Photos_1.1.0_Beta_Android.apk)<br/>[`Photos_1.1.0_Android.apk`](Output/Release/Photos_1.1.0_Android.apk) | Gesture image swiping (`Prev`/`Next` & swipe-to-dismiss) and 10-module / 70+ parameter Pro Photo Editor |
 
-Full release notes are available in [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
+Full release notes are available in [`Changelog/Changelog_1.3.md`](Changelog/Changelog_1.3.md), [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
 
 ---
 
 ## Installation & Verification
 
 ### 1. Direct Installation on Android
-1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or browse [`Output/Release/`](Output/Release/) and download **`Photos_1.2.1_Android.apk`** (or **`Photos_1.2.1_Beta_Android.apk`**).
+1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or browse [`Output/Release/`](Output/Release/) and download **`Photos_1.3.0_Android.apk`** (or **`Photos_1.3.0_Beta_Android.apk`**).
 2. Open the downloaded `.apk` file on your Android device (requires **Android 7.0 Nougat / API 24** or newer).
 3. If prompted by Android, allow installation from your browser or file manager.
 4. Launch **Photos** and grant local media permissions (`Photos & Videos` and `Music & Audio`) to index your on-device library immediately.
 
 ### 2. Optional ADB Installation
 ```powershell
-adb install -r Output/Release/Photos_1.2.1_Android.apk
+adb install -r Output/Release/Photos_1.3.0_Android.apk
 ```
 
 ### 3. Verifying APK Integrity (SHA-256)
 Every release includes a `.sha256` checksum file alongside the APK in [`Output/Release/`](Output/Release/) and on GitHub Releases:
 ```powershell
-Get-FileHash Output/Release/Photos_1.2.1_Android.apk -Algorithm SHA256
+Get-FileHash Output/Release/Photos_1.3.0_Android.apk -Algorithm SHA256
 ```
 
 ---
