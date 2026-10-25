@@ -1,0 +1,52 @@
+# Phase 5 - ComfyNetflixStyleTheaterVideoPlayer
+
+## Goal
+Build the Comfy Netflix-Style Theater Video Player featuring the "Continue Watching" Home Shelf, Episodic Folder Grouping, Auto-Play Next Episode (5s Countdown Card), `+85s` Skip Intro & Per-Folder Auto-Skip Rules, Bedtime Touch Lock, Hold-for-`2.0x` Speed, Extra-Dim Night Filter (`-80%`), `200%` Software Volume Boost, Ambient Cinema Glow, Chapter Markers, Dual Subtitles, Interactive Clickable Subtitle Transcript Search, 800% Pinch Zoom, Single-Frame Stepping, Mirror Flip, PiP, Video-to-Audio Background Handoff, Scene Bookmarks, and Video Storyboard Generator.
+
+## Scope
+- `ContinueWatchingRepository` tracking playback progress, remaining duration, and per-folder Intro/Outro auto-skip rules.
+- `EpisodeSeriesAnalyzer` grouping numbered files in folders into an in-player Episodes drawer and powering the 5-second Auto-Play Next Episode countdown card.
+- `SubtitleTranscriptEngine` parsing `.SRT`, `.VTT`, and `.ASS` files for simultaneous Dual Subtitles (Bottom Primary + Top Secondary) and the searchable, clickable Subtitle Transcript Sidebar.
+- `VideoTheaterScreen` with Bedtime Touch Lock, Hold-for-`2.0x` speed, dual-zone vertical gestures (Brightness down to `-80%` Extra Dim + Volume up to `200%`), double-tap `-10s`/`+10s` ripple, Ambient Cinema Glow, 800% pinch zoom, `-1f`/`+1f` frame step, horizontal mirror flip, PiP, and 1-tap Background Audio handoff.
+- `VideoStoryboardGenerator` exporting a `4x4` thumbnail contact sheet PNG with metadata and timestamps.
+
+## Out Of Scope
+- DRM-encrypted streaming service logins.
+
+## Features
+### Netflix Continuity & Episodic Intelligence (`F-V01`–`F-V04`)
+Delivers the Continue Watching shelf, Season/Episode grouping, 5s Next Episode countdown, and `+85s` / per-folder auto-skip intro.
+
+### Bedtime Ergonomics & Gesture HUD (`F-V05`–`F-V10`)
+Provides 1-tap Bedtime Touch Lock, Hold-for-`2.0x`, Extra-Dim `-80%` night overlay, `200%` volume boost, ripple seek, and Ambilight edge glow.
+
+### Dual Subtitles, Clickable Transcript & Pro Analysis (`F-V11`–`F-V20`)
+Supports Dual Subtitles, searchable transcript jump-to-line, subtitle/audio sync offset (`+/-50ms`), 800% zoom, frame step, mirror flip, PiP, background audio handoff, scene bookmarks, and storyboard export.
+
+## UI Mockup
+```
++--------------------------------------------------+
+| < S01E01_Pilot.mp4       [Sub/Dual] [EQ] [Lock]  | (AppTopBar)
++--------------------------------------------------+
+| [Secondary Sub: Top]                             |
+|   |Bri|      ( Hold for 2.0x Speed )     |Vol|   |
+|   |-40%|     << -10s          +10s >>   |150%|   |
+| [Primary Sub: Bottom]     [Next Ep in 4s: Play]  |
++--------------------------------------------------+
+| 14:20 =====|====(O)------|----------------- 24:00|
+| [Bg Audio] [+85s Intro] [Episodes] [Transcript]  |
++--------------------------------------------------+
+```
+
+## Logic Notes
+- Pointer inputs use `pointerInput(Unit)` (`AR-002`).
+- All modals use `AppBottomSheet` or `ConnectedInspector` (`AR-009`).
+
+## Risks
+- Risk: Subtitle encoding variations. Mitigation: Detect UTF-8/UTF-16 BOM and parse `.srt`/`.vtt`/`.ass` timestamps resiliently.
+
+## Dependencies
+- Phase 3 & Phase 4 media and DSP engines.
+
+## Acceptance Criteria
+- All 20 video theater features work seamlessly offline and pass unit tests and `verifyAndroidRules`.

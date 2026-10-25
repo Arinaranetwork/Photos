@@ -1,0 +1,33 @@
+*.iml
+.gradle
+.kotlin/
+.idea/
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+Thumbs.db
+/build
+app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Intermediate build outputs (Never ignore /Output/Release)
+/Output/Build/
+/Output/Logs/
+/Output/Reports/
+/Output/Exports/
+
+# Secrets & Environment (committed .env.Example is not ignored)
+.env
+.env.*
+!.env.Example
+*.keystore
+*.jks
+*.idsig
+*.log
