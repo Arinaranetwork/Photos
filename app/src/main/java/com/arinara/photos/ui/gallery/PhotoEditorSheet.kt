@@ -100,6 +100,7 @@ import com.arinara.photos.ui.components.presets.AppSlider
 import com.arinara.photos.ui.theme.ElectricSlateTokens
 import com.arinara.photos.ui.theme.jigglePressClickable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -166,13 +167,16 @@ fun PhotoEditorSheet(
     var selectedOpticsParamIdx by remember { mutableIntStateOf(0) }
     var selectedMaskParamIdx by remember { mutableIntStateOf(0) }
 
-    // Decode preview source bitmap on IO thread
+    // Decode preview source bitmap + fast 60fps interactive proxy bitmap + pre-extracted pixel buffers on IO thread
     var previewSourceBitmap by remember(targetItem.id) { mutableStateOf<Bitmap?>(null) }
+    var previewSourcePixels by remember(targetItem.id) { mutableStateOf<IntArray?>(null) }
+    var interactiveSourceBitmap by remember(targetItem.id) { mutableStateOf<Bitmap?>(null) }
+    var interactiveSourcePixels by remember(targetItem.id) { mutableStateOf<IntArray?>(null) }
     var previewProcessedBitmap by remember(targetItem.id) { mutableStateOf<Bitmap?>(null) }
     var liveHistogram by remember(targetItem.id) { mutableStateOf<RgbHistogramData?>(null) }
 
     LaunchedEffect(targetItem.uriString, targetItem.filePath) {
-        val decoded = withContext(Dispatchers.IO) {
+        val decodedBundle = withContext(Dispatchers.IO) {
             try {
                 val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 val f = File(targetItem.filePath)
@@ -185,43 +189,102 @@ fun PhotoEditorSheet(
                 }
                 val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight).coerceAtLeast(1)
                 var sample = 1
-                while (maxDim / sample > 960) {
+                while (maxDim / sample > 1024) {
                     sample *= 2
                 }
                 val decodeOpts = BitmapFactory.Options().apply {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
-                if (f.exists()) {
+                val highRes = if (f.exists()) {
                     BitmapFactory.decodeFile(f.absolutePath, decodeOpts)
                 } else {
                     context.contentResolver.openInputStream(Uri.parse(targetItem.uriString))?.use {
                         BitmapFactory.decodeStream(it, null, decodeOpts)
                     }
                 }
+                if (highRes != null) {
+                    val hw = highRes.width.coerceAtLeast(1)
+                    val hh = highRes.height.coerceAtLeast(1)
+                    val highPixels = IntArray(hw * hh)
+                    highRes.getPixels(highPixels, 0, hw, 0, 0, hw, hh)
+
+                    val maxHigh = maxOf(hw, hh)
+                    val fastBmp = if (maxHigh > 480) {
+                        val scale = 480f / maxHigh.toFloat()
+                        val fw = (hw * scale).roundToInt().coerceAtLeast(1)
+                        val fh = (hh * scale).roundToInt().coerceAtLeast(1)
+                        Bitmap.createScaledBitmap(highRes, fw, fh, true)
+                    } else {
+                        highRes
+                    }
+                    val fw = fastBmp.width.coerceAtLeast(1)
+                    val fh = fastBmp.height.coerceAtLeast(1)
+                    val fastPixels = IntArray(fw * fh)
+                    fastBmp.getPixels(fastPixels, 0, fw, 0, 0, fw, fh)
+                    val hist = PhotoEditorEngine.computeLiveHistogramFromPixels(fastPixels, fw, fh)
+                    Triple(highRes to highPixels, fastBmp to fastPixels, hist)
+                } else null
             } catch (_: Exception) {
                 null
             }
         }
-        previewSourceBitmap = decoded
-        if (decoded != null) {
-            previewProcessedBitmap = decoded
-            liveHistogram = withContext(Dispatchers.Default) {
-                PhotoEditorEngine.computeLiveHistogram(decoded)
-            }
+        if (decodedBundle != null) {
+            previewSourceBitmap = decodedBundle.first.first
+            previewSourcePixels = decodedBundle.first.second
+            interactiveSourceBitmap = decodedBundle.second.first
+            interactiveSourcePixels = decodedBundle.second.second
+            previewProcessedBitmap = decodedBundle.first.first
+            liveHistogram = decodedBundle.third
         }
     }
 
-    // Re-evaluate non-destructive pixel pipeline on Default dispatcher whenever activeRecipe changes
-    LaunchedEffect(previewSourceBitmap, activeRecipe) {
-        val src = previewSourceBitmap ?: return@LaunchedEffect
-        val (processed, hist) = withContext(Dispatchers.Default) {
-            val out = PhotoEditorEngine.processBitmap(src, activeRecipe)
-            val h = PhotoEditorEngine.computeLiveHistogram(out)
-            out to h
+    // Two-tier real-time 60fps pixel pipeline:
+    // Tier 1: Instant (<3ms) interactive proxy pass + histogram on every slider/curve/wheel tick
+    // Tier 2: Crisp 1024px high-resolution settle pass 90ms after interaction pauses
+    LaunchedEffect(previewSourceBitmap, interactiveSourceBitmap, activeRecipe) {
+        val highSrc = previewSourceBitmap ?: return@LaunchedEffect
+        val fastSrc = interactiveSourceBitmap ?: highSrc
+        val fastPx = interactiveSourcePixels
+        val highPx = previewSourcePixels
+
+        if (activeRecipe.activeParameterCount() == 0 && activeRecipe.aspectPreset == EditorAspectPreset.FREE) {
+            previewProcessedBitmap = highSrc
+            if (fastPx != null) {
+                liveHistogram = withContext(Dispatchers.Default) {
+                    PhotoEditorEngine.computeLiveHistogramFromPixels(fastPx, fastSrc.width, fastSrc.height)
+                }
+            }
+            return@LaunchedEffect
         }
-        previewProcessedBitmap = processed
-        liveHistogram = hist
+
+        // Tier 1: Immediate 60fps real-time render on interactive proxy bitmap
+        val (fastProcessed, fastHist) = withContext(Dispatchers.Default) {
+            PhotoEditorEngine.processBitmapAndHistogram(
+                source = fastSrc,
+                recipe = activeRecipe,
+                cachedSourcePixels = fastPx,
+                computeHistogram = true
+            )
+        }
+        previewProcessedBitmap = fastProcessed
+        if (fastHist != null) {
+            liveHistogram = fastHist
+        }
+
+        // Tier 2: Settle pass at full preview resolution if fastSrc != highSrc
+        if (fastSrc !== highSrc) {
+            delay(85L)
+            val (highProcessed, _) = withContext(Dispatchers.Default) {
+                PhotoEditorEngine.processBitmapAndHistogram(
+                    source = highSrc,
+                    recipe = activeRecipe,
+                    cachedSourcePixels = highPx,
+                    computeHistogram = false
+                )
+            }
+            previewProcessedBitmap = highProcessed
+        }
     }
 
     val currentZoom by rememberUpdatedState(zoomScale)

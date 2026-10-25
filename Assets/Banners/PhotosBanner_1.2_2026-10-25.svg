@@ -1,0 +1,31 @@
+<!-- --- Arinara Network (c) 2026 ---
+Exclusive property of Arinara Network.
+Unauthorized use, reproduction, distribution, or modification of this code,
+in whole or in part, for any purpose, is strictly prohibited without prior
+written consent from Arinara Network as sole legal owner of this codebase. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0D1117"/>
+      <stop offset="55%" stop-color="#161C26"/>
+      <stop offset="100%" stop-color="#1F2736"/>
+    </linearGradient>
+    <radialGradient id="blueGlow" cx="72%" cy="42%" r="48%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#0D1117" stop-opacity="0.0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  <rect width="1200" height="630" fill="url(#blueGlow)"/>
+  <rect x="36" y="36" width="1128" height="558" rx="28" fill="none" stroke="#262F3E" stroke-width="2"/>
+  <text x="84" y="150" fill="#3B82F6" font-family="sans-serif" font-size="22" font-weight="700" letter-spacing="3">ARINARA NETWORK • ELECTRIC SLATE</text>
+  <text x="84" y="250" fill="#F8FAFC" font-family="sans-serif" font-size="78" font-weight="800">Photos 1.2</text>
+  <text x="84" y="320" fill="#94A3B8" font-family="sans-serif" font-size="30" font-weight="500">Video-to-MP3/M4A/WAV Converter • Multi-Res &amp; Multi-FPS Video</text>
+  <text x="84" y="368" fill="#94A3B8" font-family="sans-serif" font-size="30" font-weight="500">Synced Auto-Scrolling .LRC Lyrics &amp; Stamper • Universal Share</text>
+  <rect x="84" y="430" width="220" height="54" rx="27" fill="#3B82F6"/>
+  <text x="194" y="465" fill="#F8FAFC" font-family="sans-serif" font-size="20" font-weight="700" text-anchor="middle">v1.2.0 RELEASE</text>
+  <rect x="324" y="430" width="260" height="54" rx="27" fill="#1F2736" stroke="#262F3E" stroke-width="2"/>
+  <text x="454" y="465" fill="#F8FAFC" font-family="sans-serif" font-size="18" font-weight="600" text-anchor="middle">4K / 60FPS + MP3 320K</text>
+  <rect x="604" y="430" width="260" height="54" rx="27" fill="#1F2736" stroke="#262F3E" stroke-width="2"/>
+  <text x="734" y="465" fill="#F8FAFC" font-family="sans-serif" font-size="18" font-weight="600" text-anchor="middle">SYNCED .LRC LYRICS</text>
+</svg>

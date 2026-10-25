@@ -22,6 +22,12 @@ import com.arinara.photos.media.OutputSignalMode
 import com.arinara.photos.media.QueueSlot
 import com.arinara.photos.media.VideoAspectMode
 import com.arinara.photos.media.VideoTheaterEngine
+import com.arinara.photos.media.converter.AudioConvertPreset
+import com.arinara.photos.media.converter.VideoAudioConverterEngine
+import com.arinara.photos.media.converter.VideoCodecChoice
+import com.arinara.photos.media.converter.VideoFpsPreset
+import com.arinara.photos.media.converter.VideoQualityProfile
+import com.arinara.photos.media.converter.VideoResolutionPreset
 import com.arinara.photos.media.editor.EditorModule
 import com.arinara.photos.media.editor.FilmStockPreset
 import com.arinara.photos.media.editor.HslBandAdjustment
@@ -466,11 +472,30 @@ class PhotosPowerUserSuiteTest {
     }
 
     @Test
-    fun `A-006 inspector vault PIN authentication token renamer and duplicate burst finder`() {
+    fun `A-006 inspector vault first-time password setup authentication token renamer and duplicate burst finder`() {
         val engine = MediaInspectorAndVaultEngine()
+        assertFalse(engine.hasVaultPassword())
         assertFalse(engine.isVaultUnlocked())
+        // No default "2026" password works before first-time setup
+        assertFalse(engine.unlockVaultWithPin("2026"))
         assertFalse(engine.unlockVaultWithPin("9999"))
-        assertTrue(engine.unlockVaultWithPin("2026"))
+
+        // Short password (< 4 chars) is rejected
+        assertFalse(engine.setupVaultPassword("123"))
+        assertFalse(engine.hasVaultPassword())
+        assertFalse(engine.isVaultUnlocked())
+
+        // First-time password setup immediately starts/unlocks the Vault
+        assertTrue(engine.setupVaultPassword("Arinara2026"))
+        assertTrue(engine.hasVaultPassword())
+        assertTrue(engine.isVaultUnlocked())
+        assertFalse(engine.isDecoyMode())
+
+        // After locking, only the user's configured password (or decoy) unlocks the Vault
+        engine.lockVault()
+        assertFalse(engine.isVaultUnlocked())
+        assertFalse(engine.unlockVaultWithPin("2026"))
+        assertTrue(engine.unlockVaultWithPin("Arinara2026"))
         assertTrue(engine.isVaultUnlocked())
         assertFalse(engine.isDecoyMode())
 
@@ -557,5 +582,147 @@ class PhotosPowerUserSuiteTest {
         assertEquals(0f, resetLight.dehaze, 0.001f)
         assertEquals(4.5f, resetLight.straightenDegrees, 0.001f)
         assertEquals(FilmStockPreset.CINESTILL_800T, resetLight.filmStock)
+    }
+
+    @Test
+    fun `A-008 video audio converter engine resolution bounding FPS decimation MP3 WAV conversion and LRC stamper`() {
+        // 1. Synced .LRC Timestamp Stamper & Sleep Timer Fade Multiplier
+        assertEquals("[01:05.42]", MultiQueueManager.formatLrcTimestamp(65_420L))
+        val stampedLine = MultiQueueManager.stampPlainLyricLine("   [00:10.00] Electric night sky  ", 0, 42_150L)
+        assertEquals("[00:42.15] Electric night sky", stampedLine)
+
+        val parsedStamped = MultiQueueManager.parseLrcLyrics(
+            """
+            [00:12.00] First verse line
+            [00:42.15] Electric night sky
+            """.trimIndent()
+        )
+        assertEquals(2, parsedStamped.size)
+        val reserialized = MultiQueueManager.serializeLrcLyrics(parsedStamped)
+        assertTrue(reserialized.contains("[00:42.15] Electric night sky"))
+
+        // Sleep Timer 30s Fade-Out multiplier
+        assertEquals(1.0f, MultiQueueManager.computeSleepFadeMultiplier(45_000L, 30_000L), 0.001f)
+        assertEquals(0.25f, MultiQueueManager.computeSleepFadeMultiplier(15_000L, 30_000L), 0.01f)
+        assertEquals(0.0f, MultiQueueManager.computeSleepFadeMultiplier(0L, 30_000L), 0.001f)
+
+        // 2. Multi-Quality Resolution Bounding (4K -> 1080p, 720p -> 4K no-upscale, 9:16 vertical video)
+        val dim1080 = VideoAudioConverterEngine.computeTargetVideoDimensions(
+            srcWidth = 3840,
+            srcHeight = 2160,
+            preset = VideoResolutionPreset.FHD_1080P
+        )
+        assertEquals(1920, dim1080.first)
+        assertTrue(dim1080.second in 1072..1088)
+
+        // Never upscale a 1280x720 video when 4K preset is selected
+        val noUpscale = VideoAudioConverterEngine.computeTargetVideoDimensions(
+            srcWidth = 1280,
+            srcHeight = 720,
+            preset = VideoResolutionPreset.UHD_4K
+        )
+        assertEquals(1280, noUpscale.first)
+        assertEquals(720, noUpscale.second)
+
+        // Vertical 9:16 4K (2160x3840) -> 720p
+        val vertical720 = VideoAudioConverterEngine.computeTargetVideoDimensions(
+            srcWidth = 2160,
+            srcHeight = 3840,
+            preset = VideoResolutionPreset.HD_720P
+        )
+        assertEquals(720, vertical720.first)
+        assertEquals(1280, vertical720.second)
+
+        // 3. Multi-FPS Decimation (60fps -> 30fps keeps ~half the frames; 30fps -> 60fps never fabricates frames)
+        assertEquals(30, VideoAudioConverterEngine.resolveTargetFps(30f, VideoFpsPreset.FPS_60))
+        assertEquals(24, VideoAudioConverterEngine.resolveTargetFps(60f, VideoFpsPreset.FPS_24))
+
+        var lastKeptUs = -1L
+        var keptCount = 0
+        for (frameIdx in 0 until 60) {
+            val ptsUs = frameIdx * 16_667L // 60fps
+            if (VideoAudioConverterEngine.shouldKeepFrameForTargetFps(ptsUs, lastKeptUs, 60f, VideoFpsPreset.FPS_30)) {
+                keptCount++
+                lastKeptUs = ptsUs
+            }
+        }
+        assertTrue(keptCount in 28..32)
+
+        // 4. Pre-Flight Output Size Estimation & Careful Bitrate Calculation
+        val mp3EstBytes = VideoAudioConverterEngine.estimateAudioOutputSizeBytes(
+            durationMs = 180_000L, // 3 minutes
+            preset = AudioConvertPreset.MP3_320K
+        )
+        // 320 kbps = 40 KB/s * 180s = ~7.2 MB
+        assertTrue(mp3EstBytes in 7_000_000L..7_500_000L)
+
+        val videoEstBytes = VideoAudioConverterEngine.estimateVideoOutputSizeBytes(
+            durationMs = 60_000L,
+            srcWidth = 3840,
+            srcHeight = 2160,
+            srcFps = 60f,
+            resPreset = VideoResolutionPreset.FHD_1080P,
+            fpsPreset = VideoFpsPreset.FPS_30,
+            quality = VideoQualityProfile.BALANCED,
+            codec = VideoCodecChoice.H264_AVC
+        )
+        assertTrue(videoEstBytes > 5_000_000L)
+
+        // 5. Video-to-MP3 (320kbps) and WAV (16-Bit PCM) Conversion with Determinate Progress
+        val tempDir = Files.createTempDirectory("photos_convert_test").toFile()
+        try {
+            val srcMedia = File(tempDir, "concert_4k_clip.wav")
+            SampleMediaGenerator.writeSynthesizedWavFile(srcMedia, durationSeconds = 4, sampleRate = 44100)
+            val srcVideoItem = MediaItem(
+                id = "vid_convert_1",
+                title = "Concert 4K Clip",
+                uriString = srcMedia.toURI().toString(),
+                filePath = srcMedia.absolutePath,
+                mimeType = "video/mp4",
+                extension = "MP4",
+                mediaType = MediaType.VIDEO,
+                sizeBytes = srcMedia.length(),
+                dateAddedEpochSec = 1000L,
+                durationMs = 4_000L,
+                width = 3840,
+                height = 2160
+            )
+
+            val converter = VideoAudioConverterEngine()
+            var lastProgress = 0f
+            val mp3Result = kotlinx.coroutines.runBlocking {
+                converter.convertVideoToAudio(
+                    context = null,
+                    outputDir = tempDir,
+                    videoItem = srcVideoItem,
+                    preset = AudioConvertPreset.MP3_320K,
+                    temporaryShareOnly = false,
+                    onProgress = { state ->
+                        lastProgress = state.progressFraction
+                    }
+                )
+            }
+            assertEquals(1.0f, lastProgress, 0.001f)
+            assertNotNull(mp3Result.completedFile)
+            assertTrue(mp3Result.completedFile!!.exists() && mp3Result.completedFile!!.length() > 1024L)
+            assertEquals("MP3", mp3Result.completedItem?.extension)
+            assertEquals(320, mp3Result.completedItem?.bitrateKbps)
+
+            val wavResult = kotlinx.coroutines.runBlocking {
+                converter.convertVideoToAudio(
+                    context = null,
+                    outputDir = tempDir,
+                    videoItem = srcVideoItem,
+                    preset = AudioConvertPreset.WAV_LOSSLESS,
+                    temporaryShareOnly = false,
+                    onProgress = {}
+                )
+            }
+            assertNotNull(wavResult.completedFile)
+            assertTrue(wavResult.completedFile!!.exists() && wavResult.completedFile!!.length() > 10_000L)
+            assertTrue(wavResult.completedItem?.isLossless == true)
+        } finally {
+            tempDir.deleteRecursively()
+        }
     }
 }

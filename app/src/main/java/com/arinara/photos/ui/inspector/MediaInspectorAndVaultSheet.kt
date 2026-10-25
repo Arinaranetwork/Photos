@@ -69,12 +69,14 @@ fun MediaInspectorAndVaultSheet(
     initialTab: InspectorTab = InspectorTab.HISTOGRAM_EXIF,
     targetItem: MediaItem?,
     inspectionReport: DeepMediaInspectionReport?,
+    hasVaultPassword: Boolean = false,
     vaultUnlocked: Boolean,
     vaultItems: List<MediaItem>,
     trashedItems: List<MediaItem>,
     duplicateGroups: List<DuplicateGroup>,
     onDismiss: () -> Unit,
     onScrubExifPrivacy: (MediaItem) -> Unit,
+    onSetupVaultPassword: (String) -> Boolean = { false },
     onUnlockVaultPin: (String) -> Boolean,
     onLockVault: () -> Unit,
     onToggleVaultItem: (MediaItem, Boolean) -> Unit,
@@ -85,7 +87,15 @@ fun MediaInspectorAndVaultSheet(
 
     var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
     var pinInput by remember { mutableStateOf("") }
-    var pinStatusMessage by remember { mutableStateOf("Enter 4-digit PIN (Default: 2026)") }
+    var pinStatusMessage by remember(hasVaultPassword, vaultUnlocked) {
+        mutableStateOf(
+            when {
+                vaultUnlocked -> "Vault Unlocked"
+                !hasVaultPassword -> "First-time setup: create a password (min 4 characters) to start your Vault."
+                else -> "Enter your password to unlock the Private Vault."
+            }
+        )
+    }
     var copiedHexNotice by remember { mutableStateOf<String?>(null) }
 
     AppBottomSheet(
@@ -309,7 +319,11 @@ fun MediaInspectorAndVaultSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (vaultUnlocked) "Private Vault" else "Locked Vault",
+                                text = when {
+                                    vaultUnlocked -> "Private Vault"
+                                    !hasVaultPassword -> "Set Up Vault Password"
+                                    else -> "Locked Vault"
+                                },
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
@@ -336,7 +350,7 @@ fun MediaInspectorAndVaultSheet(
                             color = ElectricSlateTokens.TextMuted
                         )
 
-                        if (!vaultUnlocked) {
+                        if (!hasVaultPassword) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Box(
                                 modifier = Modifier
@@ -360,7 +374,7 @@ fun MediaInspectorAndVaultSheet(
                                 )
                                 if (pinInput.isEmpty()) {
                                     Text(
-                                        text = "PIN...",
+                                        text = "Create password (min 4 chars)...",
                                         fontFamily = ElmsSans,
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 14.sp,
@@ -370,11 +384,64 @@ fun MediaInspectorAndVaultSheet(
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             AppButton(
-                                text = "Unlock",
+                                text = "Set Password & Start Vault",
                                 leadingIcon = Icons.Outlined.LockOpen,
                                 onClick = {
-                                    val ok = onUnlockVaultPin(pinInput.ifBlank { "2026" })
-                                    pinStatusMessage = if (ok) "Unlocked" else "Invalid PIN"
+                                    val ok = onSetupVaultPassword(pinInput)
+                                    if (ok) {
+                                        pinInput = ""
+                                        pinStatusMessage = "Password created — Vault started"
+                                    } else {
+                                        pinStatusMessage = "Password must be at least 4 characters"
+                                    }
+                                },
+                                variant = AppButtonVariant.PRIMARY,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else if (!vaultUnlocked) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(ElectricSlateTokens.BgCanvas)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                BasicTextField(
+                                    value = pinInput,
+                                    onValueChange = { pinInput = it },
+                                    singleLine = true,
+                                    textStyle = TextStyle(
+                                        fontFamily = ElmsSans,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = ElectricSlateTokens.PrimaryAccent
+                                    ),
+                                    cursorBrush = SolidColor(ElectricSlateTokens.PrimaryAccent),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                if (pinInput.isEmpty()) {
+                                    Text(
+                                        text = "Enter password...",
+                                        fontFamily = ElmsSans,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 14.sp,
+                                        color = ElectricSlateTokens.TextMuted
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            AppButton(
+                                text = "Unlock Vault",
+                                leadingIcon = Icons.Outlined.LockOpen,
+                                onClick = {
+                                    val ok = onUnlockVaultPin(pinInput)
+                                    if (ok) {
+                                        pinInput = ""
+                                        pinStatusMessage = "Unlocked"
+                                    } else {
+                                        pinStatusMessage = "Incorrect password"
+                                    }
                                 },
                                 variant = AppButtonVariant.PRIMARY,
                                 modifier = Modifier.fillMaxWidth()

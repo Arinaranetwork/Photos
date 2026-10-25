@@ -22,6 +22,8 @@ Provides 1-tap Bedtime Touch Lock, Hold-for-`2.0x`, Extra-Dim `-80%` night overl
 
 ### Dual Subtitles, Clickable Transcript & Pro Analysis (`F-V11`–`F-V20`)
 Supports Dual Subtitles, searchable transcript jump-to-line, subtitle/audio sync offset (`+/-50ms`), 800% zoom, frame step, mirror flip, PiP, background audio handoff, scene bookmarks, and storyboard export.
+- **System Brightness Preservation (`v1.1.2` `A-002`)**: Opening a video preserves the device's native system brightness (`WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE`) instead of forcing/locking brightness to max; custom window/software brightness only activates when the user explicitly drags the brightness gesture or slider, with a 1-tap `"System"` reset chip.
+- **Minimized Picture-in-Picture Mode (`v1.1.2` `A-003`)**: Tapping `PiP` minimizes the video player into a compact, draggable Picture-in-Picture overlay (and supports Android system PiP with `RemoteAction` controls) where all complex drawers and HUDs are hidden and **only the core buttons are active: Go Left (`<<`), Play/Pause, and Go Right (`>>`)** (plus Expand and Close).
 
 ## UI Mockup
 ```

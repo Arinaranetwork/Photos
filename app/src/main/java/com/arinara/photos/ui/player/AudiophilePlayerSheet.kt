@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,13 +42,17 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RepeatOne
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,6 +123,7 @@ fun AudiophilePlayerSheet(
     cueSlices: List<CueTrackSlice>,
     bookmarks: List<AudioBookmark>,
     sleepTimerRemainingMin: Int,
+    sleepTimerRemainingSec: Int = sleepTimerRemainingMin * 60,
     onDismiss: () -> Unit,
     onPlayPauseToggle: () -> Unit,
     onSeekToMs: (Long) -> Unit,
@@ -144,6 +152,8 @@ fun AudiophilePlayerSheet(
     onAddBookmark: (String) -> Unit,
     onRemoveBookmark: (String) -> Unit,
     onSaveTagEdits: (String, String, String) -> Unit,
+    onSaveLrcLyrics: (String) -> Unit = {},
+    onShareCurrentTrack: (MediaItem) -> Unit = {},
     onOpenEqStudio: () -> Unit,
     onOpenTrimmerForCurrent: () -> Unit
 ) {
@@ -152,6 +162,17 @@ fun AudiophilePlayerSheet(
     var activeSubTab by remember { mutableStateOf(PlayerSubTab.NOW_PLAYING) }
     var showSignalPathInspector by remember { mutableStateOf(false) }
     var lyricOffsetMs by remember { mutableLongStateOf(0L) }
+    var isEditingLyrics by remember(currentTrack.id) { mutableStateOf(false) }
+    var editableLrcText by remember(currentTrack.id, lyrics) {
+        mutableStateOf(
+            if (lyrics.isNotEmpty()) {
+                MultiQueueManager.serializeLrcLyrics(lyrics)
+            } else {
+                "[00:00.00] ${currentTrack.title} - ${currentTrack.artist}\nPaste or type lyrics here, then tap Stamp Line while playing"
+            }
+        )
+    }
+    var stampCursorLineIndex by remember(currentTrack.id) { mutableIntStateOf(0) }
 
     var editTitle by remember(currentTrack.id) { mutableStateOf(currentTrack.title) }
     var editArtist by remember(currentTrack.id) { mutableStateOf(currentTrack.artist) }
@@ -480,13 +501,25 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    AppButton(
-                        text = "Equalizer",
-                        leadingIcon = Icons.Outlined.Equalizer,
-                        onClick = onOpenEqStudio,
-                        variant = AppButtonVariant.PRIMARY,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AppButton(
+                            text = "Equalizer",
+                            leadingIcon = Icons.Outlined.Equalizer,
+                            onClick = onOpenEqStudio,
+                            variant = AppButtonVariant.PRIMARY,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AppButton(
+                            text = "Share",
+                            leadingIcon = Icons.Outlined.Share,
+                            onClick = { onShareCurrentTrack(currentTrack) },
+                            variant = AppButtonVariant.SECONDARY,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
 
                 PlayerSubTab.UP_NEXT_QUEUES -> {
@@ -666,6 +699,19 @@ fun AudiophilePlayerSheet(
 
                 PlayerSubTab.LYRICS_CUE -> {
                     val activeLyricIdx = MultiQueueManager.findActiveLyricIndex(lyrics, playbackPositionMs, lyricOffsetMs)
+                    val lyricListState = rememberLazyListState()
+
+                    LaunchedEffect(activeLyricIdx, isEditingLyrics) {
+                        if (!isEditingLyrics && activeLyricIdx >= 0 && activeLyricIdx < lyrics.size) {
+                            try {
+                                lyricListState.animateScrollToItem(
+                                    index = (activeLyricIdx - 1).coerceAtLeast(0)
+                                )
+                            } catch (_: Throwable) {
+                            }
+                        }
+                    }
+
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -677,42 +723,137 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Lyrics",
+                                text = if (isEditingLyrics) ".LRC Lyric Editor" else "Synced Lyrics",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (!isEditingLyrics) {
+                                    AppPillChip(
+                                        label = "-100ms",
+                                        isSelected = false,
+                                        onClick = { lyricOffsetMs -= 100L }
+                                    )
+                                    AppPillChip(
+                                        label = "${lyricOffsetMs}ms",
+                                        isSelected = lyricOffsetMs != 0L,
+                                        onClick = { lyricOffsetMs = 0L }
+                                    )
+                                    AppPillChip(
+                                        label = "+100ms",
+                                        isSelected = false,
+                                        onClick = { lyricOffsetMs += 100L }
+                                    )
+                                }
                                 AppPillChip(
-                                    label = "-100ms",
-                                    isSelected = false,
-                                    onClick = { lyricOffsetMs -= 100L }
-                                )
-                                AppPillChip(
-                                    label = "${lyricOffsetMs}ms",
-                                    isSelected = lyricOffsetMs != 0L,
-                                    onClick = { lyricOffsetMs = 0L }
-                                )
-                                AppPillChip(
-                                    label = "+100ms",
-                                    isSelected = false,
-                                    onClick = { lyricOffsetMs += 100L }
+                                    label = if (isEditingLyrics) "View Synced" else "Edit .LRC",
+                                    isSelected = isEditingLyrics,
+                                    onClick = {
+                                        if (!isEditingLyrics && lyrics.isNotEmpty()) {
+                                            editableLrcText = MultiQueueManager.serializeLrcLyrics(lyrics)
+                                        }
+                                        isEditingLyrics = !isEditingLyrics
+                                    }
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        if (lyrics.isEmpty()) {
+
+                        if (isEditingLyrics) {
+                            val totalLines = editableLrcText.lines().size.coerceAtLeast(1)
+                            val safeLineIdx = stampCursorLineIndex.coerceIn(0, totalLines - 1)
+                            val currentStampTag = MultiQueueManager.formatLrcTimestamp(playbackPositionMs)
+
                             Text(
-                                text = "No .lrc lyrics file found for this track.",
+                                text = "Paste lyrics below or tap 'Stamp Line' as each verse plays to tag $currentStampTag:",
+                                fontFamily = ElmsSans,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 12.sp,
+                                color = ElectricSlateTokens.TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AppButton(
+                                    text = "Stamp Line #${safeLineIdx + 1} @ $currentStampTag",
+                                    leadingIcon = Icons.Outlined.Timer,
+                                    onClick = {
+                                        editableLrcText = MultiQueueManager.stampPlainLyricLine(
+                                            rawText = editableLrcText,
+                                            lineIndex = safeLineIdx,
+                                            timestampMs = playbackPositionMs
+                                        )
+                                        stampCursorLineIndex = (safeLineIdx + 1) % totalLines.coerceAtLeast(1)
+                                    },
+                                    variant = AppButtonVariant.SECONDARY,
+                                    height = 36.dp,
+                                    horizontalPadding = 10.dp,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                AppButton(
+                                    text = "Line 1",
+                                    onClick = { stampCursorLineIndex = 0 },
+                                    variant = AppButtonVariant.SECONDARY,
+                                    height = 36.dp,
+                                    horizontalPadding = 10.dp,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(ElectricSlateTokens.BgCanvas)
+                                    .padding(12.dp)
+                            ) {
+                                BasicTextField(
+                                    value = editableLrcText,
+                                    onValueChange = { editableLrcText = it },
+                                    textStyle = TextStyle(
+                                        fontFamily = ElmsSans,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp,
+                                        color = ElectricSlateTokens.TextPrimary
+                                    ),
+                                    cursorBrush = SolidColor(ElectricSlateTokens.PrimaryAccent),
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            AppButton(
+                                text = "Save Synced .LRC Lyrics",
+                                leadingIcon = Icons.Outlined.Save,
+                                onClick = {
+                                    onSaveLrcLyrics(editableLrcText)
+                                    isEditingLyrics = false
+                                },
+                                variant = AppButtonVariant.PRIMARY,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else if (lyrics.isEmpty()) {
+                            Text(
+                                text = "No .lrc lyrics file found for this track. Tap 'Edit .LRC' above to create or sync lyrics.",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
                                 color = ElectricSlateTokens.TextMuted
                             )
                         } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                lyrics.forEachIndexed { idx, line ->
+                            LazyColumn(
+                                state = lyricListState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(240.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                itemsIndexed(lyrics) { idx, line ->
                                     val isCurrent = idx == activeLyricIdx
                                     Row(
                                         modifier = Modifier
@@ -942,19 +1083,28 @@ fun AudiophilePlayerSheet(
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
+                        val sleepStatusLabel = if (sleepTimerRemainingSec > 0) {
+                            val minsPart = sleepTimerRemainingSec / 60
+                            val secsPart = sleepTimerRemainingSec % 60
+                            val fadeNote = if (sleepTimerRemainingSec <= 30) " • Smooth Fade-Out Active" else ""
+                            String.format("Sleep Timer (%02d:%02d%s):", minsPart, secsPart, fadeNote)
+                        } else {
+                            "Sleep Timer (30s Smooth Fade-Out):"
+                        }
+                        Text(
+                            text = sleepStatusLabel,
+                            fontFamily = ElmsSans,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = if (sleepTimerRemainingSec in 1..30) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.TextMuted
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Sleep Timer:",
-                                fontFamily = ElmsSans,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp,
-                                color = ElectricSlateTokens.TextMuted
-                            )
-                            listOf(0 to "Off", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, label) ->
+                            listOf(0 to "Off", 1 to "1m", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, label) ->
                                 AppPillChip(
                                     label = label,
                                     isSelected = sleepTimerRemainingMin == mins,

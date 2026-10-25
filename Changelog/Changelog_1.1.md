@@ -31,3 +31,9 @@ Banner: /Assets/Banners/PhotosBanner_1.1_2026-10-25.png
 
 ### 1.1.1 (2026-10-25)
 - **Updated App Launcher Icon**: Replaced the legacy launcher icon across adaptive (`mipmap-anydpi-v26`) and all density buckets (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi` square & round) with the new Photos dual-peak mountain emblem (`Assets/Icons/photo_6262632732634584666_y.jpg`).
+
+### 1.1.2 (2026-10-25)
+- **Real-Time 60fps Photo Editor Rendering (`PhotoEditorEngine` & `PhotoEditorSheet`)**: Eliminated slider/curve/wheel lag by precomputing 256-entry fused RGB tone curves, 360° 8-band HSL lookup tables, 256-entry 3-Way Color Grading lookup tables, 1D Vignette coordinate power tables, zero-allocation Film Stock evaluation, multi-core parallel scanline striping, and two-tier interactive (`480px` `<3ms` 60fps) + full-preview (`1024px`) progressive rendering.
+- **System Brightness Preservation in Video Player (`VideoTheaterSheet`)**: Stopped forcing or locking screen brightness when opening a video (`WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE` by default); hardware/scrim brightness overrides only activate when the user explicitly drags the left-side brightness gesture or the Brightness slider (with a `"System Auto"` reset pill).
+- **Minimized Picture-in-Picture (PiP) Mode with Core Controls Only (`VideoTheaterSheet` & `MainActivity`)**: Tapping `PiP` minimizes the video player into a floating Picture-in-Picture window (and supports OS system PiP) where only the video and the 3 core buttons (**Go Left**, **Play/Pause**, and **Go Right**, plus expand/close) are active while allowing full browsing of the app.
+- **First-Time Private Vault Password Setup (`MediaInspectorAndVaultEngine` & `MediaInspectorAndVaultSheet`)**: Removed the hardcoded `"2026"` default PIN; opening the Private Vault for the first time prompts the user to create a password (persisted via salted `SHA-256` hash in `SharedPreferences`) and immediately unlocks and starts the Vault.

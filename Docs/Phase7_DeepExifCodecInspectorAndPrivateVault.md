@@ -19,7 +19,8 @@ Renders R, G, B, and Luminance curves, full camera EXIF & container codec tables
 Strips GPS/device metadata with 1 tap and batch-converts, resizes, or token-renames multiple files.
 
 ### PIN-Locked Private Vault, Recycle Bin & Duplicate Cleaner (`F-G11`, `F-G12`)
-Secures private media behind a PIN lock, retains deleted items for 30 days in Trash, and identifies duplicate files.
+Secures private media behind a password/PIN lock, retains deleted items for 30 days in Trash, and identifies duplicate files.
+- **First-Time Vault Password Creation Flow (`v1.1.2` `A-004`)**: No default password exists. On first-time Vault launch (`!hasVaultPassword()`), the user is prompted to create their own Vault password; submitting it stores the salted `SHA-256` hash in `SharedPreferences` and immediately unlocks and starts the Vault. Subsequent visits require entering the user-created password to unlock.
 
 ## UI Mockup
 ```

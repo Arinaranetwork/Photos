@@ -463,6 +463,31 @@ class MultiQueueManager {
             }
         }
 
+        fun formatLrcTimestamp(timestampMs: Long): String {
+            val safe = timestampMs.coerceAtLeast(0L)
+            val minutes = safe / 60_000L
+            val seconds = (safe % 60_000L) / 1_000L
+            val hundredths = (safe % 1_000L) / 10L
+            return String.format("[%02d:%02d.%02d]", minutes, seconds, hundredths)
+        }
+
+        fun serializeLrcLyrics(lines: List<LrcLyricLine>): String {
+            return lines
+                .sortedBy { it.timestampMs }
+                .joinToString("\n") { line ->
+                    "${formatLrcTimestamp(line.timestampMs)} ${line.text.trim()}"
+                }
+        }
+
+        fun stampPlainLyricLine(rawText: String, lineIndex: Int, timestampMs: Long): String {
+            val rawLines = rawText.lines().toMutableList()
+            if (lineIndex !in rawLines.indices) return rawText
+            val existing = rawLines[lineIndex].trim()
+            val cleanText = lrcLineRegex.find(existing)?.groupValues?.getOrNull(4)?.trim() ?: existing
+            rawLines[lineIndex] = "${formatLrcTimestamp(timestampMs)} $cleanText"
+            return rawLines.joinToString("\n")
+        }
+
         fun computeSleepFadeMultiplier(remainingMs: Long, fadeWindowMs: Long = 30_000L): Float {
             if (remainingMs <= 0L) return 0f
             if (remainingMs >= fadeWindowMs) return 1f

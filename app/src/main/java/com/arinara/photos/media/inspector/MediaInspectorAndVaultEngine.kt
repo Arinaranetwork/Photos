@@ -6,6 +6,7 @@
 
 package com.arinara.photos.media.inspector
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.exifinterface.media.ExifInterface
@@ -75,21 +76,47 @@ enum class BatchImageFormat(val ext: String, val mime: String) {
     WEBP("WEBP", "image/webp")
 }
 
-class MediaInspectorAndVaultEngine {
+class MediaInspectorAndVaultEngine(context: Context? = null) {
 
-    private var masterPinHash: String = hashPin("2026")
+    private val prefs = try {
+        context?.getSharedPreferences("arinara_photos_vault_prefs", Context.MODE_PRIVATE)
+    } catch (_: Throwable) {
+        null
+    }
+
+    private var masterPinHash: String? = prefs?.getString("vault_master_pin_hash", null)?.takeIf { it.isNotBlank() }
     private var decoyPinHash: String = hashPin("0000")
     private var vaultUnlocked: Boolean = false
     private var decoyModeActive: Boolean = false
 
+    fun hasVaultPassword(): Boolean = !masterPinHash.isNullOrBlank()
     fun isVaultUnlocked(): Boolean = vaultUnlocked
     fun isDecoyMode(): Boolean = decoyModeActive
 
+    /**
+     * Sets up the Vault password for the first time (or resets it) and immediately unlocks/starts the Vault.
+     */
+    fun setupVaultPassword(newPassword: String): Boolean {
+        val clean = newPassword.trim()
+        if (clean.length < 4) return false
+        val newHash = hashPin(clean)
+        masterPinHash = newHash
+        try {
+            prefs?.edit()?.putString("vault_master_pin_hash", newHash)?.apply()
+        } catch (_: Throwable) {
+        }
+        vaultUnlocked = true
+        decoyModeActive = false
+        return true
+    }
+
     fun unlockVaultWithPin(pin: String): Boolean {
+        val currentMasterHash = masterPinHash ?: return false
         val clean = pin.trim()
+        if (clean.isEmpty()) return false
         val candidate = hashPin(clean)
         return when (candidate) {
-            masterPinHash -> {
+            currentMasterHash -> {
                 vaultUnlocked = true
                 decoyModeActive = false
                 true
@@ -104,8 +131,14 @@ class MediaInspectorAndVaultEngine {
     }
 
     fun updateVaultMasterPin(newPin: String) {
-        if (newPin.trim().length >= 4) {
-            masterPinHash = hashPin(newPin.trim())
+        val clean = newPin.trim()
+        if (clean.length >= 4) {
+            val newHash = hashPin(clean)
+            masterPinHash = newHash
+            try {
+                prefs?.edit()?.putString("vault_master_pin_hash", newHash)?.apply()
+            } catch (_: Throwable) {
+            }
         }
     }
 

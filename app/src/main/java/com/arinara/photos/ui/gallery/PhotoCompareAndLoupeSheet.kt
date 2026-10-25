@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Icon
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.arinara.photos.data.model.MediaItem
 import com.arinara.photos.data.model.MediaType
+import com.arinara.photos.media.share.MediaShareHelper
 import com.arinara.photos.theme.ElmsSans
 import com.arinara.photos.ui.components.presets.AppButton
 import com.arinara.photos.ui.components.presets.AppButtonVariant
@@ -470,6 +472,22 @@ fun PhotoCompareAndLoupeSheet(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val context = LocalContext.current
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(ElectricSlateTokens.SurfacePanel.copy(alpha = 0.88f))
+                            .jigglePressClickable { MediaShareHelper.shareMediaItem(context, activeItem) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Share,
+                            contentDescription = "Share Photo",
+                            tint = ElectricSlateTokens.TextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(40.dp)

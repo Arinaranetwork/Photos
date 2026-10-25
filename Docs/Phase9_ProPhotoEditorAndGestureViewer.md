@@ -45,7 +45,10 @@ Swipe horizontally through photos with one finger at `1.0x` zoom, swipe down to 
 
 ## Logic Notes
 - Uses `ElectricSlateTokens` and `ElmsSans` exclusively (`AR-001`–`AR-016`) with zero `.border(...)` outlines (`R-010`) and zero `"Studio"` text (`R-012`).
-- Two-tier rendering: downsampled `960px` interactive preview on `Dispatchers.Default` for responsive slider scrubbing, and full-resolution `Bitmap` processing on `Dispatchers.IO` when exporting to `MediaStore`.
+- Real-time 60fps two-tier rendering (`v1.1.2` `A-001`):
+  - Pre-extracted `IntArray` pixel buffers for both interactive (`480px`) and high-resolution (`1024px`) preview bitmaps to eliminate repeated `Bitmap.getPixels` overhead.
+  - Precomputed 256-entry fused Master Tone + RGB Curve LUTs, 360-degree 8-Band HSL lookup tables (`hslHueDeltaLut`, `hslSatMultLut`, `hslLumDeltaLut`), 256-entry 3-Way Color Grade lookup tables, and 1D Vignette coordinate power tables so the per-pixel loop runs in `O(1)` array lookups without per-pixel `Math.pow` or trigonometry calls.
+  - Multi-core parallel scanline striping across CPU cores on `Dispatchers.Default` and direct `IntArray` histogram calculation (eliminating `Bitmap.getPixel` JNI calls) for instant 60fps real-time slider scrubbing followed by a crisp high-res settle pass.
 
 ## Risks
 - Risk: Large bitmap memory allocation during full-res export. Mitigation: Process row-by-row / reusable `IntArray` pixel buffers and safe `inSampleSize` fallback if device RAM is constrained.

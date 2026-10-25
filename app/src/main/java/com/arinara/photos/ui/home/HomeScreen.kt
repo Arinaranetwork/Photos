@@ -101,6 +101,7 @@ import com.arinara.photos.media.inspector.DeepMediaInspectionReport
 import com.arinara.photos.media.inspector.DuplicateGroup
 import com.arinara.photos.media.inspector.MediaInspectorAndVaultEngine
 import com.arinara.photos.media.editor.PhotoEditRecipe
+import com.arinara.photos.media.share.MediaShareHelper
 import com.arinara.photos.media.trimmer.MediaTrimmerEngine
 import com.arinara.photos.theme.ElmsSans
 import com.arinara.photos.ui.components.presets.AppButton
@@ -123,6 +124,7 @@ import com.arinara.photos.ui.inspector.InspectorTab
 import com.arinara.photos.ui.inspector.MediaInspectorAndVaultSheet
 import com.arinara.photos.ui.player.AudioEqStudioSheet
 import com.arinara.photos.ui.player.AudiophilePlayerSheet
+import com.arinara.photos.PipCoreAction
 import com.arinara.photos.ui.theme.ElectricSlateTokens
 import com.arinara.photos.ui.theme.jigglePressClickable
 import com.arinara.photos.ui.video.VideoTheaterSheet
@@ -149,7 +151,10 @@ private val HOME_FILTER_CHIPS = listOf(
 @Composable
 fun HomeScreen(
     modifier: Modifier = Modifier,
-    onRequestPipMode: () -> Unit = {}
+    onRequestPipMode: () -> Unit = {},
+    isInSystemPipMode: Boolean = false,
+    pipActionTick: Int = 0,
+    lastPipAction: PipCoreAction? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -160,7 +165,7 @@ fun HomeScreen(
     val audioDspController = remember { AudioDspController() }
     val videoTheaterEngine = remember { VideoTheaterEngine() }
     val mediaTrimmerEngine = remember { MediaTrimmerEngine() }
-    val inspectorAndVaultEngine = remember { MediaInspectorAndVaultEngine() }
+    val inspectorAndVaultEngine = remember(context) { MediaInspectorAndVaultEngine(context) }
 
     val allMediaItems by mediaRepository.allItems.collectAsState()
     val activeQueueState by multiQueueManager.activeQueueState.collectAsState()
@@ -194,18 +199,21 @@ fun HomeScreen(
     var isEqSheetMinimized by remember { mutableStateOf(false) }
 
     var showVideoTheaterSheet by remember { mutableStateOf(false) }
+    var isVideoPipMinimized by remember { mutableStateOf(false) }
     var activeVideoItem by remember { mutableStateOf<MediaItem?>(null) }
 
     var showInspectorVaultSheet by remember { mutableStateOf(false) }
     var inspectorInitialTab by remember { mutableStateOf(InspectorTab.HISTOGRAM_EXIF) }
     var inspectorTargetItem by remember { mutableStateOf<MediaItem?>(null) }
-    var vaultUnlockedState by remember { mutableStateOf(false) }
+    var hasVaultPasswordState by remember { mutableStateOf(inspectorAndVaultEngine.hasVaultPassword()) }
+    var vaultUnlockedState by remember { mutableStateOf(inspectorAndVaultEngine.isVaultUnlocked()) }
 
     // Playback State (Audio & Video)
     var isAudioPlaying by remember { mutableStateOf(false) }
     var audioPositionMs by remember { mutableLongStateOf(0L) }
     var audioDurationMs by remember { mutableLongStateOf(0L) }
     var sleepTimerRemainingMin by remember { mutableIntStateOf(0) }
+    var sleepTimerRemainingSec by remember { mutableIntStateOf(0) }
     var spectrumBins by remember { mutableStateOf(FloatArray(32)) }
     var waveformSamples by remember { mutableStateOf(FloatArray(64)) }
 
@@ -325,6 +333,38 @@ fun HomeScreen(
                 )
             }
         } catch (_: Throwable) {
+        }
+    }
+
+    // Sleep Timer Countdown with Smooth 30s Volume Fade-Out
+    LaunchedEffect(sleepTimerRemainingSec > 0) {
+        if (sleepTimerRemainingSec <= 0) {
+            try {
+                exoPlayer?.volume = 1.0f
+            } catch (_: Throwable) {
+            }
+            return@LaunchedEffect
+        }
+        while (sleepTimerRemainingSec > 0) {
+            val fadeMultiplier = MultiQueueManager.computeSleepFadeMultiplier(
+                remainingMs = sleepTimerRemainingSec * 1000L,
+                fadeWindowMs = 30_000L
+            )
+            try {
+                exoPlayer?.volume = fadeMultiplier
+            } catch (_: Throwable) {
+            }
+            delay(1_000L)
+            sleepTimerRemainingSec = (sleepTimerRemainingSec - 1).coerceAtLeast(0)
+            sleepTimerRemainingMin = (sleepTimerRemainingSec + 59) / 60
+            if (sleepTimerRemainingSec == 0) {
+                isAudioPlaying = false
+                try {
+                    exoPlayer?.volume = 1.0f
+                } catch (_: Throwable) {
+                }
+                statusNoticeText = "Sleep timer finished — playback paused"
+            }
         }
     }
 
@@ -457,7 +497,7 @@ fun HomeScreen(
         showPhotoEditorSheet ||
         showAudiophilePlayerSheet ||
         showEqStudioSheet ||
-        showVideoTheaterSheet ||
+        (showVideoTheaterSheet && !isVideoPipMinimized && !isInSystemPipMode) ||
         showInspectorVaultSheet
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -718,6 +758,7 @@ fun HomeScreen(
                                                 activeVideoItem = vid
                                                 videoPositionMs = vid.resumePositionMs
                                                 isVideoPlaying = true
+                                                isVideoPipMinimized = false
                                                 showVideoTheaterSheet = true
                                             }
                                         )
@@ -792,6 +833,7 @@ fun HomeScreen(
                                                     activeVideoItem = item
                                                     videoPositionMs = item.resumePositionMs
                                                     isVideoPlaying = true
+                                                    isVideoPipMinimized = false
                                                     showVideoTheaterSheet = true
                                                 }
                                                 else -> {
@@ -1165,22 +1207,30 @@ fun HomeScreen(
             var currentLyrics by remember { mutableStateOf<List<LrcLyricLine>>(emptyList()) }
             var currentCueSlices by remember { mutableStateOf<List<CueTrackSlice>>(emptyList()) }
 
-            LaunchedEffect(currentAudioTrack?.filePath, audioDurationMs) {
+            LaunchedEffect(currentAudioTrack?.filePath, currentAudioTrack?.id, audioDurationMs) {
                 val path = currentAudioTrack?.filePath ?: ""
-                if (path.isBlank()) {
+                val trackId = currentAudioTrack?.id ?: ""
+                if (path.isBlank() && trackId.isBlank()) {
                     currentLyrics = emptyList()
                     currentCueSlices = emptyList()
                     return@LaunchedEffect
                 }
                 withContext(Dispatchers.IO) {
                     val base = path.substringBeforeLast('.')
-                    val lrcFile = File("$base.lrc")
-                    val parsedLrc = if (lrcFile.exists()) {
-                        MultiQueueManager.parseLrcLyrics(lrcFile.readText())
-                    } else emptyList()
+                    val sidecarLrcFile = if (base.isNotBlank()) File("$base.lrc") else null
+                    val fallbackLrcFile = File(File(context.filesDir, "lyrics"), "$trackId.lrc")
+                    val parsedLrc = when {
+                        sidecarLrcFile != null && sidecarLrcFile.exists() -> {
+                            MultiQueueManager.parseLrcLyrics(sidecarLrcFile.readText())
+                        }
+                        fallbackLrcFile.exists() -> {
+                            MultiQueueManager.parseLrcLyrics(fallbackLrcFile.readText())
+                        }
+                        else -> emptyList()
+                    }
 
                     val cueFile = File("$base.cue")
-                    val parsedCue = if (cueFile.exists()) {
+                    val parsedCue = if (base.isNotBlank() && cueFile.exists()) {
                         MultiQueueManager.parseCueSheet(
                             cueFile.readText(),
                             path,
@@ -1219,6 +1269,7 @@ fun HomeScreen(
                 cueSlices = currentCueSlices,
                 bookmarks = currentAudioTrack?.let { multiQueueManager.getBookmarksForMedia(it.id) }.orEmpty() + bookmarks.filter { it.mediaId == currentAudioTrack?.id }.distinctBy { it.id },
                 sleepTimerRemainingMin = sleepTimerRemainingMin,
+                sleepTimerRemainingSec = sleepTimerRemainingSec,
                 onDismiss = { showAudiophilePlayerSheet = false },
                 onPlayPauseToggle = { isAudioPlaying = !isAudioPlaying },
                 onSeekToMs = { pos ->
@@ -1280,7 +1331,18 @@ fun HomeScreen(
                 onChangeCrossfeedPercent = { audioDspController.setCrossfeedPercent(it) },
                 onChangeChannelBalance = { audioDspController.setChannelBalance(it) },
                 onChangeReplayGainMode = { audioDspController.setReplayGainMode(it) },
-                onSetSleepTimerMin = { sleepTimerRemainingMin = it },
+                onSetSleepTimerMin = { mins ->
+                    sleepTimerRemainingMin = mins
+                    sleepTimerRemainingSec = mins * 60
+                    if (mins <= 0) {
+                        try {
+                            exoPlayer?.volume = 1.0f
+                        } catch (_: Throwable) {
+                        }
+                    } else {
+                        statusNoticeText = "Sleep timer set for $mins min (30s smooth fade-out)"
+                    }
+                },
                 onAddBookmark = { label ->
                     currentAudioTrack?.let { multiQueueManager.addBookmark(it.id, audioPositionMs, label) }
                 },
@@ -1290,6 +1352,38 @@ fun HomeScreen(
                         mediaRepository.updateMediaTags(it.id, title, artist, album)
                         statusNoticeText = "Saved tags for '$title'"
                     }
+                },
+                onSaveLrcLyrics = { rawLrc ->
+                    val track = currentAudioTrack
+                    if (track != null) {
+                        val parsed = MultiQueueManager.parseLrcLyrics(rawLrc)
+                        currentLyrics = parsed
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val base = track.filePath.substringBeforeLast('.')
+                            val sidecarWritten = if (base.isNotBlank()) {
+                                try {
+                                    val sidecar = File("$base.lrc")
+                                    sidecar.writeText(rawLrc, Charsets.UTF_8)
+                                    true
+                                } catch (_: Throwable) {
+                                    false
+                                }
+                            } else false
+                            val lyricsDir = File(context.filesDir, "lyrics").apply { mkdirs() }
+                            val fallbackFile = File(lyricsDir, "${track.id}.lrc")
+                            fallbackFile.writeText(rawLrc, Charsets.UTF_8)
+                            withContext(Dispatchers.Main) {
+                                statusNoticeText = if (sidecarWritten) {
+                                    "Saved synced .LRC lyrics (${parsed.size} lines) to ${File("$base.lrc").name}"
+                                } else {
+                                    "Saved synced .LRC lyrics (${parsed.size} lines) for ${track.title}"
+                                }
+                            }
+                        }
+                    }
+                },
+                onShareCurrentTrack = { track ->
+                    MediaShareHelper.shareMediaItem(context, track)
                 },
                 onOpenEqStudio = {
                     showAudiophilePlayerSheet = false
@@ -1375,9 +1469,15 @@ fun HomeScreen(
                 playbackPositionMs = videoPositionMs,
                 videoDurationMs = activeVideoItem?.durationMs ?: 18_000L,
                 playbackSpeed = videoPlaybackSpeed,
+                isPipMinimized = isVideoPipMinimized,
+                onPipMinimizedChange = { isVideoPipMinimized = it },
+                isInSystemPipMode = isInSystemPipMode,
+                pipActionTick = pipActionTick,
+                lastPipAction = lastPipAction,
                 onDismiss = {
                     activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, videoPositionMs) }
                     isVideoPlaying = false
+                    isVideoPipMinimized = false
                     showVideoTheaterSheet = false
                 },
                 onPlayPauseToggle = { isVideoPlaying = !isVideoPlaying },
@@ -1411,6 +1511,7 @@ fun HomeScreen(
                 onGenerateStoryboard = {},
                 onHandOffToBackgroundAudio = { vid, posMs ->
                     isVideoPlaying = false
+                    isVideoPipMinimized = false
                     showVideoTheaterSheet = false
                     val audioEquivalent = vid.copy(
                         mediaType = MediaType.AUDIO,
@@ -1423,7 +1524,14 @@ fun HomeScreen(
                     isAudioPlaying = true
                 },
                 onEnterPipMode = onRequestPipMode,
-                onOpenTrimmerForVideo = {}
+                onOpenTrimmerForVideo = {},
+                onExportedConvertedMedia = { exportedItem, summaryMsg ->
+                    mediaRepository.addOrUpdateMediaItem(exportedItem)
+                    if (exportedItem.mediaType == MediaType.AUDIO) {
+                        multiQueueManager.playNext(exportedItem)
+                    }
+                    statusNoticeText = summaryMsg
+                }
             )
         }
 
@@ -1445,6 +1553,7 @@ fun HomeScreen(
                 initialTab = inspectorInitialTab,
                 targetItem = targetForInspector,
                 inspectionReport = currentInspectionReport,
+                hasVaultPassword = hasVaultPasswordState,
                 vaultUnlocked = vaultUnlockedState,
                 vaultItems = vaultItems,
                 trashedItems = trashedItems,
@@ -1456,6 +1565,15 @@ fun HomeScreen(
                     mediaRepository.addOrUpdateMediaItem(cleanItem)
                     inspectorTargetItem = cleanItem
                     statusNoticeText = "Removed location metadata: ${cleanItem.title}"
+                },
+                onSetupVaultPassword = { newPass ->
+                    val ok = inspectorAndVaultEngine.setupVaultPassword(newPass)
+                    hasVaultPasswordState = inspectorAndVaultEngine.hasVaultPassword()
+                    vaultUnlockedState = inspectorAndVaultEngine.isVaultUnlocked()
+                    if (ok) {
+                        statusNoticeText = "Vault password set — Private Vault unlocked"
+                    }
+                    ok
                 },
                 onUnlockVaultPin = { pin ->
                     val ok = inspectorAndVaultEngine.unlockVaultWithPin(pin)

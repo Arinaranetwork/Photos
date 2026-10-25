@@ -20,6 +20,8 @@ import com.arinara.photos.data.model.MediaType
 import com.arinara.photos.media.inspector.RgbHistogramData
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -556,32 +558,75 @@ object PhotoEditorEngine {
         return rbDiff.coerceIn(-100f, 100f) to gmDiff.coerceIn(-100f, 100f)
     }
 
+    private val workerCount: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+    private val parallelPool = Executors.newFixedThreadPool(workerCount) { runnable ->
+        Thread(runnable, "PhotoEditorWorker").apply { isDaemon = true }
+    }
+
     /**
-     * Full non-destructive pixel & geometry pipeline.
+     * Full non-destructive pixel & geometry pipeline with LUT precomputation and multi-core scanline striping.
      * Operates on real Bitmap pixels with zero mock overlays.
      */
-    fun processBitmap(source: Bitmap, recipe: PhotoEditRecipe): Bitmap {
+    fun processBitmap(
+        source: Bitmap,
+        recipe: PhotoEditRecipe,
+        cachedSourcePixels: IntArray? = null
+    ): Bitmap {
+        return processBitmapAndHistogram(source, recipe, cachedSourcePixels, computeHistogram = false).first
+    }
+
+    /**
+     * Processes a Bitmap and optionally computes the live 64-bin RGB + Luma histogram directly from the
+     * output IntArray pixel buffer (avoiding JNI Bitmap.getPixel overhead).
+     */
+    fun processBitmapAndHistogram(
+        source: Bitmap,
+        recipe: PhotoEditRecipe,
+        cachedSourcePixels: IntArray? = null,
+        computeHistogram: Boolean = true
+    ): Pair<Bitmap, RgbHistogramData?> {
+        val srcW = source.width.coerceAtLeast(1)
+        val srcH = source.height.coerceAtLeast(1)
+
+        // Identity fast-path when no parameters are active
+        if (recipe.activeParameterCount() == 0 && recipe.aspectPreset == EditorAspectPreset.FREE) {
+            val hist = if (computeHistogram) {
+                if (cachedSourcePixels != null && cachedSourcePixels.size == srcW * srcH) {
+                    computeLiveHistogramFromPixels(cachedSourcePixels, srcW, srcH)
+                } else {
+                    computeLiveHistogram(source)
+                }
+            } else null
+            return source to hist
+        }
+
         // Step 1: Geometry, Crop, 90° Rotation, Straighten, Flip, Keystone & Lens Distortion
-        val geomBitmap = applyGeometryAndOptics(source, recipe)
-        val w = geomBitmap.width
-        val h = geomBitmap.height
-        if (w <= 0 || h <= 0) return geomBitmap
+        val geomResult = applyGeometryAndOpticsPixels(source, recipe, cachedSourcePixels)
+        val pixels = geomResult.first
+        val w = geomResult.second
+        val h = geomResult.third
+        if (w <= 0 || h <= 0) return source to null
 
-        val pixels = IntArray(w * h)
-        geomBitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-
-        // Precompute LUTs for Master Tone and Individual R/G/B Point Curves
+        // Precompute fused 256-entry LUTs combining Master Tone + Individual R/G/B Point Curves
         val masterLut = buildMasterToneLut(recipe)
-        val redLut = FloatArray(256) { i -> evaluateMonotoneCubicCurve(recipe.redCurveNodes, i / 255f) }
-        val greenLut = FloatArray(256) { i -> evaluateMonotoneCubicCurve(recipe.greenCurveNodes, i / 255f) }
-        val blueLut = FloatArray(256) { i -> evaluateMonotoneCubicCurve(recipe.blueCurveNodes, i / 255f) }
+        val combinedRedLut = FloatArray(256)
+        val combinedGreenLut = FloatArray(256)
+        val combinedBlueLut = FloatArray(256)
+        for (i in 0..255) {
+            val m = masterLut[i]
+            combinedRedLut[i] = evaluateMonotoneCubicCurve(recipe.redCurveNodes, m)
+            combinedGreenLut[i] = evaluateMonotoneCubicCurve(recipe.greenCurveNodes, m)
+            combinedBlueLut[i] = evaluateMonotoneCubicCurve(recipe.blueCurveNodes, m)
+        }
 
         val dehazeNorm = (recipe.dehaze / 100f).coerceIn(-1f, 1f)
+        val hasDehaze = abs(dehazeNorm) > 1e-3f
         val tempNorm = (recipe.temperature / 100f).coerceIn(-1f, 1f)
         val tintNorm = (recipe.tint / 100f).coerceIn(-1f, 1f)
         val vibNorm = (recipe.vibrance / 100f).coerceIn(-1f, 1f)
         val satNorm = (recipe.saturation / 100f).coerceIn(-1f, 1f)
         val shadowTintNorm = (recipe.shadowTint / 100f).coerceIn(-1f, 1f)
+        val hasWb = abs(tempNorm) > 1e-3f || abs(tintNorm) > 1e-3f || abs(shadowTintNorm) > 1e-3f
 
         // Camera RGB Calibration 3x3 Matrix
         val rHue = recipe.redPrimaryHue / 100f * 0.22f
@@ -598,37 +643,97 @@ object PhotoEditorEngine {
             abs(it.hueShift) > 0.5f || abs(it.saturation) > 0.5f || abs(it.luminance) > 0.5f
         }
 
+        // Precompute 360-degree 8-Band HSL lookup tables for O(1) per-pixel evaluation
+        val hslHueDeltaLut = FloatArray(360)
+        val hslSatMultLut = FloatArray(360) { 1f }
+        val hslLumDeltaLut = FloatArray(360)
+        if (hasHsl) {
+            for (deg in 0 until 360) {
+                val hueF = deg.toFloat()
+                var totalH = 0f
+                var totalS = 1f
+                var totalL = 0f
+                for (band in HslColorBand.entries) {
+                    val adj = recipe.hslBands[band] ?: continue
+                    if (abs(adj.hueShift) < 0.5f && abs(adj.saturation) < 0.5f && abs(adj.luminance) < 0.5f) continue
+                    var diff = abs(hueF - band.centerHueDeg)
+                    if (diff > 180f) diff = 360f - diff
+                    if (diff < band.halfWidthDeg) {
+                        val u = diff / band.halfWidthDeg
+                        val weight = cos(u * (PI.toFloat() * 0.5f)).pow(2)
+                        totalH += (adj.hueShift / 100f) * 42f * weight
+                        totalS += (adj.saturation / 100f) * weight
+                        totalL += (adj.luminance / 100f) * 0.32f * weight
+                    }
+                }
+                hslHueDeltaLut[deg] = totalH
+                hslSatMultLut[deg] = totalS.coerceAtLeast(0f)
+                hslLumDeltaLut[deg] = totalL
+            }
+        }
+
         val has3WayGrade = recipe.shadowsSat > 0.5f || abs(recipe.shadowsLuma) > 0.5f ||
             recipe.midtonesSat > 0.5f || abs(recipe.midtonesLuma) > 0.5f ||
             recipe.highlightsSat > 0.5f || abs(recipe.highlightsLuma) > 0.5f
 
-        val shRad = Math.toRadians(recipe.shadowsHue.toDouble()).toFloat()
-        val shTintR = cos(shRad) * (recipe.shadowsSat / 100f) * 0.28f
-        val shTintG = cos(shRad - 2.0944f) * (recipe.shadowsSat / 100f) * 0.28f
-        val shTintB = cos(shRad + 2.0944f) * (recipe.shadowsSat / 100f) * 0.28f
+        // Precompute 256-entry 3-Way Color Grading lookup tables for O(1) per-pixel evaluation
+        val gradeRDeltaLut = FloatArray(256)
+        val gradeGDeltaLut = FloatArray(256)
+        val gradeBDeltaLut = FloatArray(256)
+        if (has3WayGrade) {
+            val shRad = Math.toRadians(recipe.shadowsHue.toDouble()).toFloat()
+            val shTintR = cos(shRad) * (recipe.shadowsSat / 100f) * 0.28f
+            val shTintG = cos(shRad - 2.0944f) * (recipe.shadowsSat / 100f) * 0.28f
+            val shTintB = cos(shRad + 2.0944f) * (recipe.shadowsSat / 100f) * 0.28f
 
-        val midRad = Math.toRadians(recipe.midtonesHue.toDouble()).toFloat()
-        val midTintR = cos(midRad) * (recipe.midtonesSat / 100f) * 0.24f
-        val midTintG = cos(midRad - 2.0944f) * (recipe.midtonesSat / 100f) * 0.24f
-        val midTintB = cos(midRad + 2.0944f) * (recipe.midtonesSat / 100f) * 0.24f
+            val midRad = Math.toRadians(recipe.midtonesHue.toDouble()).toFloat()
+            val midTintR = cos(midRad) * (recipe.midtonesSat / 100f) * 0.24f
+            val midTintG = cos(midRad - 2.0944f) * (recipe.midtonesSat / 100f) * 0.24f
+            val midTintB = cos(midRad + 2.0944f) * (recipe.midtonesSat / 100f) * 0.24f
 
-        val hiRad = Math.toRadians(recipe.highlightsHue.toDouble()).toFloat()
-        val hiTintR = cos(hiRad) * (recipe.highlightsSat / 100f) * 0.28f
-        val hiTintG = cos(hiRad - 2.0944f) * (recipe.highlightsSat / 100f) * 0.28f
-        val hiTintB = cos(hiRad + 2.0944f) * (recipe.highlightsSat / 100f) * 0.28f
+            val hiRad = Math.toRadians(recipe.highlightsHue.toDouble()).toFloat()
+            val hiTintR = cos(hiRad) * (recipe.highlightsSat / 100f) * 0.28f
+            val hiTintG = cos(hiRad - 2.0944f) * (recipe.highlightsSat / 100f) * 0.28f
+            val hiTintB = cos(hiRad + 2.0944f) * (recipe.highlightsSat / 100f) * 0.28f
 
-        val gradePivot = (0.5f - (recipe.gradeBalance / 100f) * 0.28f).coerceIn(0.18f, 0.82f)
-        val gradeBlend = (recipe.gradeBlending / 100f).coerceIn(0.05f, 1f)
+            val gradePivot = (0.5f - (recipe.gradeBalance / 100f) * 0.28f).coerceIn(0.18f, 0.82f)
+            val gradeBlend = (recipe.gradeBlending / 100f).coerceIn(0.05f, 1f)
+            val expPower = 2f - gradeBlend
+
+            for (i in 0..255) {
+                val yLuma = i / 255f
+                val wS = ((1f - (yLuma / gradePivot.coerceAtLeast(0.05f)).coerceIn(0f, 1f)).pow(expPower)).coerceIn(0f, 1f)
+                val wH = (((yLuma - gradePivot).coerceAtLeast(0f) / (1f - gradePivot).coerceAtLeast(0.05f)).pow(expPower)).coerceIn(0f, 1f)
+                val wM = (1f - wS - wH).coerceAtLeast(0f)
+                val lumaShift = (wS * (recipe.shadowsLuma / 100f) + wM * (recipe.midtonesLuma / 100f) + wH * (recipe.highlightsLuma / 100f)) * 0.22f
+                gradeRDeltaLut[i] = wS * shTintR + wM * midTintR + wH * hiTintR + lumaShift
+                gradeGDeltaLut[i] = wS * shTintG + wM * midTintG + wH * hiTintG + lumaShift
+                gradeBDeltaLut[i] = wS * shTintB + wM * midTintB + wH * hiTintB + lumaShift
+            }
+        }
 
         val vigAmt = (recipe.vignetteAmount / 100f).coerceIn(-1f, 1f)
+        val hasVignette = abs(vigAmt) > 1e-3f
         val vigMid = (recipe.vignetteMidpoint / 100f).coerceIn(0.05f, 0.95f)
         val vigFeather = (recipe.vignetteFeather / 100f).coerceIn(0.05f, 1f)
         val vigPower = 2f + (recipe.vignetteRoundness / 100f) * 1.2f
+        val dxPowLut = if (hasVignette) FloatArray(w) { x -> abs(((x.toFloat() / w.coerceAtLeast(1)) - 0.5f) * 2f).pow(vigPower) } else FloatArray(0)
+        val dyPowLut = if (hasVignette) FloatArray(h) { y -> abs(((y.toFloat() / h.coerceAtLeast(1)) - 0.5f) * 2f).pow(vigPower) } else FloatArray(0)
+        val vigFalloffLut = if (hasVignette) {
+            FloatArray(513) { idx ->
+                val sumPow = (idx / 256f).coerceAtLeast(0f)
+                val dist = sumPow.pow(1f / vigPower)
+                val edge = ((dist - vigMid) / vigFeather.coerceAtLeast(0.08f)).coerceIn(0f, 1f)
+                edge * edge * (3f - 2f * edge)
+            }
+        } else FloatArray(0)
 
         val grainAmt = (recipe.grainAmount / 100f).coerceIn(0f, 1f)
+        val hasGrain = grainAmt > 1e-3f
         val grainScale = (1f + (recipe.grainSize / 100f) * 3.5f).coerceAtLeast(1f)
         val grainRough = (0.5f + (recipe.grainRoughness / 100f)).coerceIn(0.5f, 1.5f)
         val defringeAmt = (recipe.chromaticDefringe / 100f).coerceIn(-1f, 1f)
+        val hasHslOrSat = hasHsl || abs(vibNorm) > 1e-3f || abs(satNorm) > 1e-3f || abs(defringeAmt) > 1e-3f
 
         val hasMask = recipe.maskType != SelectiveMaskType.NONE && (
             abs(recipe.maskExposureEv) > 0.01f || abs(recipe.maskContrast) > 0.5f ||
@@ -639,241 +744,312 @@ object PhotoEditorEngine {
         val maskSatMult = 1f + (recipe.maskSaturation / 100f)
         val maskTempShift = (recipe.maskTemperature / 100f) * 0.22f
 
+        val filmStock = recipe.filmStock
         val filmStrength = (recipe.filmIntensity / 100f).coerceIn(0f, 1f)
+        val hasFilm = filmStock != FilmStockPreset.ORIGINAL && filmStrength > 1e-3f
         val posterizeSteps = recipe.posterizeLevels.coerceIn(2, 64)
         val solarizeNorm = (recipe.solarizeThreshold / 100f).coerceIn(0f, 1f)
 
-        // Single-pass per-pixel color, tone, HSL, 3-way grade, film stock, mask, vignette & grain
-        for (y in 0 until h) {
-            val ny = (y.toFloat() / h.coerceAtLeast(1))
-            val dyNorm = (ny - 0.5f) * 2f
-            val rowOffset = y * w
+        // Multi-core parallel scanline striping across CPU cores
+        val numStrips = minOf(workerCount, h.coerceAtLeast(1))
+        val rowsPerStrip = (h + numStrips - 1) / numStrips
+        val tasks = ArrayList<Callable<Unit>>(numStrips)
 
-            for (x in 0 until w) {
-                val idx = rowOffset + x
-                val c = pixels[idx]
-                val a = (c ushr 24) and 0xFF
-                var r = ((c ushr 16) and 0xFF) / 255f
-                var g = ((c ushr 8) and 0xFF) / 255f
-                var b = (c and 0xFF) / 255f
+        for (strip in 0 until numStrips) {
+            val yStart = strip * rowsPerStrip
+            val yEnd = minOf(yStart + rowsPerStrip, h)
+            if (yStart >= yEnd) continue
+            tasks.add(Callable {
+                for (y in yStart until yEnd) {
+                    val ny = y.toFloat() / h.coerceAtLeast(1)
+                    val dyPow = if (hasVignette) dyPowLut[y] else 0f
+                    val rowOffset = y * w
 
-                // 1. Atmospheric Dehaze
-                if (abs(dehazeNorm) > 1e-3f) {
-                    val darkChannel = minOf(r, g, b)
-                    if (dehazeNorm > 0f) {
-                        val trans = (1f - dehazeNorm * 0.65f * darkChannel).coerceIn(0.22f, 1f)
-                        r = ((r - 0.85f * (1f - trans)) / trans).coerceIn(0f, 1f)
-                        g = ((g - 0.85f * (1f - trans)) / trans).coerceIn(0f, 1f)
-                        b = ((b - 0.88f * (1f - trans)) / trans).coerceIn(0f, 1f)
-                    } else {
-                        val mist = -dehazeNorm * 0.45f
-                        r = (r + (0.92f - r) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
-                        g = (g + (0.94f - g) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
-                        b = (b + (0.97f - b) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
-                    }
-                }
+                    for (x in 0 until w) {
+                        val idx = rowOffset + x
+                        val c = pixels[idx]
+                        val a = (c ushr 24) and 0xFF
+                        var r = ((c ushr 16) and 0xFF) / 255f
+                        var g = ((c ushr 8) and 0xFF) / 255f
+                        var b = (c and 0xFF) / 255f
 
-                // 2. White Balance (Temperature & Tint) + Shadow Tint
-                if (abs(tempNorm) > 1e-3f || abs(tintNorm) > 1e-3f || abs(shadowTintNorm) > 1e-3f) {
-                    r = (r + tempNorm * 0.22f + tintNorm * 0.08f).coerceIn(0f, 1f)
-                    g = (g - tintNorm * 0.18f).coerceIn(0f, 1f)
-                    b = (b - tempNorm * 0.22f + tintNorm * 0.08f).coerceIn(0f, 1f)
-                    if (abs(shadowTintNorm) > 1e-3f) {
-                        val lumaPre = 0.299f * r + 0.587f * g + 0.114f * b
-                        val shWeight = (1f - lumaPre) * (1f - lumaPre)
-                        r = (r + shadowTintNorm * 0.14f * shWeight).coerceIn(0f, 1f)
-                        g = (g - shadowTintNorm * 0.14f * shWeight).coerceIn(0f, 1f)
-                    }
-                }
-
-                // 3. Master Tone LUT + R/G/B Point Curves
-                r = masterLut[(r * 255f).roundToInt().coerceIn(0, 255)]
-                g = masterLut[(g * 255f).roundToInt().coerceIn(0, 255)]
-                b = masterLut[(b * 255f).roundToInt().coerceIn(0, 255)]
-
-                r = redLut[(r * 255f).roundToInt().coerceIn(0, 255)]
-                g = greenLut[(g * 255f).roundToInt().coerceIn(0, 255)]
-                b = blueLut[(b * 255f).roundToInt().coerceIn(0, 255)]
-
-                // 4. Camera RGB Primary Calibration Matrix
-                if (hasCalibration) {
-                    val nr = r * (1f - abs(rHue)) + g * max(0f, rHue) + b * max(0f, -rHue)
-                    val ng = g * (1f - abs(gHue)) + b * max(0f, gHue) + r * max(0f, -gHue)
-                    val nb = b * (1f - abs(bHue)) + r * max(0f, bHue) + g * max(0f, -bHue)
-                    val lumaCal = 0.299f * nr + 0.587f * ng + 0.114f * nb
-                    r = (lumaCal + (nr - lumaCal) * rSatBoost).coerceIn(0f, 1f)
-                    g = (lumaCal + (ng - lumaCal) * gSatBoost).coerceIn(0f, 1f)
-                    b = (lumaCal + (nb - lumaCal) * bSatBoost).coerceIn(0f, 1f)
-                }
-
-                // 5. 8-Band HSL Per-Color Mixer + Vibrance & Global Saturation
-                if (hasHsl || abs(vibNorm) > 1e-3f || abs(satNorm) > 1e-3f || abs(defringeAmt) > 1e-3f) {
-                    val maxC = maxOf(r, g, b)
-                    val minC = minOf(r, g, b)
-                    val delta = maxC - minC
-                    var lum = 0.5f * (maxC + minC)
-                    var sat = if (delta < 1e-5f) 0f else delta / (1f - abs(2f * lum - 1f)).coerceAtLeast(1e-4f)
-                    var hue = when {
-                        delta < 1e-5f -> 0f
-                        maxC == r -> 60f * (((g - b) / delta) % 6f)
-                        maxC == g -> 60f * (((b - r) / delta) + 2f)
-                        else -> 60f * (((r - g) / delta) + 4f)
-                    }
-                    if (hue < 0f) hue += 360f
-
-                    if (hasHsl && sat > 0.02f) {
-                        var totalHueDelta = 0f
-                        var totalSatMult = 1f
-                        var totalLumDelta = 0f
-
-                        for (band in HslColorBand.entries) {
-                            val adj = recipe.hslBands[band] ?: continue
-                            if (abs(adj.hueShift) < 0.5f && abs(adj.saturation) < 0.5f && abs(adj.luminance) < 0.5f) continue
-                            var diff = abs(hue - band.centerHueDeg)
-                            if (diff > 180f) diff = 360f - diff
-                            if (diff < band.halfWidthDeg) {
-                                val u = diff / band.halfWidthDeg
-                                val weight = cos(u * (PI.toFloat() * 0.5f)).pow(2)
-                                totalHueDelta += (adj.hueShift / 100f) * 42f * weight
-                                totalSatMult += (adj.saturation / 100f) * weight
-                                totalLumDelta += (adj.luminance / 100f) * 0.32f * weight
+                        // 1. Atmospheric Dehaze
+                        if (hasDehaze) {
+                            val darkChannel = minOf(r, g, b)
+                            if (dehazeNorm > 0f) {
+                                val trans = (1f - dehazeNorm * 0.65f * darkChannel).coerceIn(0.22f, 1f)
+                                r = ((r - 0.85f * (1f - trans)) / trans).coerceIn(0f, 1f)
+                                g = ((g - 0.85f * (1f - trans)) / trans).coerceIn(0f, 1f)
+                                b = ((b - 0.88f * (1f - trans)) / trans).coerceIn(0f, 1f)
+                            } else {
+                                val mist = -dehazeNorm * 0.45f
+                                r = (r + (0.92f - r) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
+                                g = (g + (0.94f - g) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
+                                b = (b + (0.97f - b) * mist * (1f - darkChannel * 0.5f)).coerceIn(0f, 1f)
                             }
                         }
-                        hue = (hue + totalHueDelta + 360f) % 360f
-                        sat = (sat * totalSatMult.coerceAtLeast(0f)).coerceIn(0f, 1f)
-                        lum = (lum + totalLumDelta * sat).coerceIn(0f, 1f)
-                    }
 
-                    // Chromatic Aberration Defringe (targets purple/magenta & cyan high-saturation fringes)
-                    if (abs(defringeAmt) > 1e-3f && sat > 0.25f) {
-                        val purpleDist = min(abs(hue - 295f), 360f - abs(hue - 295f))
-                        val cyanDist = abs(hue - 185f)
-                        if (purpleDist < 32f || cyanDist < 28f) {
-                            sat = (sat * (1f - abs(defringeAmt) * 0.65f)).coerceIn(0f, 1f)
+                        // 2. White Balance (Temperature & Tint) + Shadow Tint
+                        if (hasWb) {
+                            r = (r + tempNorm * 0.22f + tintNorm * 0.08f).coerceIn(0f, 1f)
+                            g = (g - tintNorm * 0.18f).coerceIn(0f, 1f)
+                            b = (b - tempNorm * 0.22f + tintNorm * 0.08f).coerceIn(0f, 1f)
+                            if (abs(shadowTintNorm) > 1e-3f) {
+                                val lumaPre = 0.299f * r + 0.587f * g + 0.114f * b
+                                val shWeight = (1f - lumaPre) * (1f - lumaPre)
+                                r = (r + shadowTintNorm * 0.14f * shWeight).coerceIn(0f, 1f)
+                                g = (g - shadowTintNorm * 0.14f * shWeight).coerceIn(0f, 1f)
+                            }
                         }
-                    }
 
-                    // Vibrance (skin-tone aware non-linear boost) & Saturation
-                    if (abs(vibNorm) > 1e-3f) {
-                        val skinDist = min(abs(hue - 26f), 360f - abs(hue - 26f))
-                        val skinGuard = if (skinDist < 25f && vibNorm > 0f) 0.45f else 1.0f
-                        val vibBoost = vibNorm * (1f - sat * sat) * skinGuard
-                        sat = (sat + sat * vibBoost).coerceIn(0f, 1f)
-                    }
-                    if (abs(satNorm) > 1e-3f) {
-                        sat = (sat * (1f + satNorm)).coerceIn(0f, 1f)
-                    }
+                        // 3. Fused Master Tone LUT + R/G/B Point Curves (O(1) array read)
+                        r = combinedRedLut[(r * 255f + 0.5f).toInt().coerceIn(0, 255)]
+                        g = combinedGreenLut[(g * 255f + 0.5f).toInt().coerceIn(0, 255)]
+                        b = combinedBlueLut[(b * 255f + 0.5f).toInt().coerceIn(0, 255)]
 
-                    // HSL -> RGB
-                    val cChroma = (1f - abs(2f * lum - 1f)) * sat
-                    val hPrime = hue / 60f
-                    val xCol = cChroma * (1f - abs(hPrime % 2f - 1f))
-                    val m = lum - 0.5f * cChroma
-                    when {
-                        hPrime < 1f -> { r = cChroma + m; g = xCol + m; b = m }
-                        hPrime < 2f -> { r = xCol + m; g = cChroma + m; b = m }
-                        hPrime < 3f -> { r = m; g = cChroma + m; b = xCol + m }
-                        hPrime < 4f -> { r = m; g = xCol + m; b = cChroma + m }
-                        hPrime < 5f -> { r = xCol + m; g = m; b = cChroma + m }
-                        else -> { r = cChroma + m; g = m; b = xCol + m }
-                    }
-                }
-
-                // 6. 3-Way Color Grading Wheels (Shadows / Midtones / Highlights)
-                if (has3WayGrade) {
-                    val yLuma = (0.299f * r + 0.587f * g + 0.114f * b).coerceIn(0f, 1f)
-                    val wS = ((1f - (yLuma / gradePivot.coerceAtLeast(0.05f)).coerceIn(0f, 1f)).pow(2f - gradeBlend)).coerceIn(0f, 1f)
-                    val wH = (((yLuma - gradePivot).coerceAtLeast(0f) / (1f - gradePivot).coerceAtLeast(0.05f)).pow(2f - gradeBlend)).coerceIn(0f, 1f)
-                    val wM = (1f - wS - wH).coerceAtLeast(0f)
-
-                    val lumaShift = (wS * (recipe.shadowsLuma / 100f) + wM * (recipe.midtonesLuma / 100f) + wH * (recipe.highlightsLuma / 100f)) * 0.22f
-                    r = (r + wS * shTintR + wM * midTintR + wH * hiTintR + lumaShift).coerceIn(0f, 1f)
-                    g = (g + wS * shTintG + wM * midTintG + wH * hiTintG + lumaShift).coerceIn(0f, 1f)
-                    b = (b + wS * shTintB + wM * midTintB + wH * hiTintB + lumaShift).coerceIn(0f, 1f)
-                }
-
-                // 7. 16 Curated Film Stocks
-                if (recipe.filmStock != FilmStockPreset.ORIGINAL && filmStrength > 1e-3f) {
-                    val graded = applyFilmStockPixel(r, g, b, recipe.filmStock)
-                    r = r + (graded[0] - r) * filmStrength
-                    g = g + (graded[1] - g) * filmStrength
-                    b = b + (graded[2] - b) * filmStrength
-                }
-
-                // 8. Selective Radial / Linear Gradient Mask
-                if (hasMask) {
-                    val nx = x.toFloat() / w.coerceAtLeast(1)
-                    val maskW = computeSelectiveMaskWeight(nx, ny, recipe)
-                    if (maskW > 1e-3f) {
-                        var mr = (r * maskExpMult + maskTempShift).coerceIn(0f, 1f)
-                        var mg = (g * maskExpMult).coerceIn(0f, 1f)
-                        var mb = (b * maskExpMult - maskTempShift).coerceIn(0f, 1f)
-                        if (abs(recipe.maskContrast) > 0.5f) {
-                            mr = 0.5f + (mr - 0.5f) * maskContGamma
-                            mg = 0.5f + (mg - 0.5f) * maskContGamma
-                            mb = 0.5f + (mb - 0.5f) * maskContGamma
+                        // 4. Camera RGB Primary Calibration Matrix
+                        if (hasCalibration) {
+                            val nr = r * (1f - abs(rHue)) + g * max(0f, rHue) + b * max(0f, -rHue)
+                            val ng = g * (1f - abs(gHue)) + b * max(0f, gHue) + r * max(0f, -gHue)
+                            val nb = b * (1f - abs(bHue)) + r * max(0f, bHue) + g * max(0f, -bHue)
+                            val lumaCal = 0.299f * nr + 0.587f * ng + 0.114f * nb
+                            r = (lumaCal + (nr - lumaCal) * rSatBoost).coerceIn(0f, 1f)
+                            g = (lumaCal + (ng - lumaCal) * gSatBoost).coerceIn(0f, 1f)
+                            b = (lumaCal + (nb - lumaCal) * bSatBoost).coerceIn(0f, 1f)
                         }
-                        val mLuma = 0.299f * mr + 0.587f * mg + 0.114f * mb
-                        mr = (mLuma + (mr - mLuma) * maskSatMult).coerceIn(0f, 1f)
-                        mg = (mLuma + (mg - mLuma) * maskSatMult).coerceIn(0f, 1f)
-                        mb = (mLuma + (mb - mLuma) * maskSatMult).coerceIn(0f, 1f)
 
-                        r += (mr - r) * maskW
-                        g += (mg - g) * maskW
-                        b += (mb - b) * maskW
+                        // 5. 8-Band HSL Per-Color Mixer + Vibrance & Global Saturation
+                        if (hasHslOrSat) {
+                            val maxC = maxOf(r, g, b)
+                            val minC = minOf(r, g, b)
+                            val delta = maxC - minC
+                            var lum = 0.5f * (maxC + minC)
+                            var sat = if (delta < 1e-5f) 0f else delta / (1f - abs(2f * lum - 1f)).coerceAtLeast(1e-4f)
+                            var hue = when {
+                                delta < 1e-5f -> 0f
+                                maxC == r -> 60f * (((g - b) / delta) % 6f)
+                                maxC == g -> 60f * (((b - r) / delta) + 2f)
+                                else -> 60f * (((r - g) / delta) + 4f)
+                            }
+                            if (hue < 0f) hue += 360f
+
+                            if (hasHsl && sat > 0.02f) {
+                                val hIdx = hue.toInt().coerceIn(0, 359)
+                                val dHue = hslHueDeltaLut[hIdx]
+                                val sMult = hslSatMultLut[hIdx]
+                                val dLum = hslLumDeltaLut[hIdx]
+                                hue = (hue + dHue + 360f) % 360f
+                                sat = (sat * sMult).coerceIn(0f, 1f)
+                                lum = (lum + dLum * sat).coerceIn(0f, 1f)
+                            }
+
+                            if (abs(defringeAmt) > 1e-3f && sat > 0.25f) {
+                                val purpleDist = min(abs(hue - 295f), 360f - abs(hue - 295f))
+                                val cyanDist = abs(hue - 185f)
+                                if (purpleDist < 32f || cyanDist < 28f) {
+                                    sat = (sat * (1f - abs(defringeAmt) * 0.65f)).coerceIn(0f, 1f)
+                                }
+                            }
+
+                            if (abs(vibNorm) > 1e-3f) {
+                                val skinDist = min(abs(hue - 26f), 360f - abs(hue - 26f))
+                                val skinGuard = if (skinDist < 25f && vibNorm > 0f) 0.45f else 1.0f
+                                val vibBoost = vibNorm * (1f - sat * sat) * skinGuard
+                                sat = (sat + sat * vibBoost).coerceIn(0f, 1f)
+                            }
+                            if (abs(satNorm) > 1e-3f) {
+                                sat = (sat * (1f + satNorm)).coerceIn(0f, 1f)
+                            }
+
+                            val cChroma = (1f - abs(2f * lum - 1f)) * sat
+                            val hPrime = hue / 60f
+                            val xCol = cChroma * (1f - abs(hPrime % 2f - 1f))
+                            val m = lum - 0.5f * cChroma
+                            when {
+                                hPrime < 1f -> { r = cChroma + m; g = xCol + m; b = m }
+                                hPrime < 2f -> { r = xCol + m; g = cChroma + m; b = m }
+                                hPrime < 3f -> { r = m; g = cChroma + m; b = xCol + m }
+                                hPrime < 4f -> { r = m; g = xCol + m; b = cChroma + m }
+                                hPrime < 5f -> { r = xCol + m; g = m; b = cChroma + m }
+                                else -> { r = cChroma + m; g = m; b = xCol + m }
+                            }
+                        }
+
+                        // 6. 3-Way Color Grading Wheels (O(1) LUT read)
+                        if (has3WayGrade) {
+                            val yIdx = ((0.299f * r + 0.587f * g + 0.114f * b) * 255f + 0.5f).toInt().coerceIn(0, 255)
+                            r = (r + gradeRDeltaLut[yIdx]).coerceIn(0f, 1f)
+                            g = (g + gradeGDeltaLut[yIdx]).coerceIn(0f, 1f)
+                            b = (b + gradeBDeltaLut[yIdx]).coerceIn(0f, 1f)
+                        }
+
+                        // 7. 16 Curated Film Stocks (Zero heap allocation)
+                        if (hasFilm) {
+                            val yL = (0.299f * r + 0.587f * g + 0.114f * b).coerceIn(0f, 1f)
+                            var fr = r
+                            var fg = g
+                            var fb = b
+                            when (filmStock) {
+                                FilmStockPreset.ORIGINAL -> Unit
+                                FilmStockPreset.KODAK_PORTRA_400 -> {
+                                    fr = (r * 1.05f + 0.02f).coerceIn(0f, 1f)
+                                    fg = (g * 1.01f + 0.01f).coerceIn(0f, 1f)
+                                    fb = (b * 0.94f + 0.03f * (1f - yL)).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.KODAK_GOLD_200 -> {
+                                    fr = (r * 1.10f + 0.03f).coerceIn(0f, 1f)
+                                    fg = (g * 1.03f + 0.01f).coerceIn(0f, 1f)
+                                    fb = (b * 0.86f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.KODAK_EKTAR_100 -> {
+                                    fr = (0.5f + (r - 0.5f) * 1.18f).coerceIn(0f, 1f)
+                                    fg = (0.5f + (g - 0.5f) * 1.12f).coerceIn(0f, 1f)
+                                    fb = (0.5f + (b - 0.5f) * 1.15f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.FUJI_VELVIA_50 -> {
+                                    fr = (yL + (r - yL) * 1.38f).coerceIn(0f, 1f)
+                                    fg = (yL + (g - yL) * 1.35f).coerceIn(0f, 1f)
+                                    fb = (yL + (b - yL) * 1.35f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.FUJI_PRO_400H -> {
+                                    fr = (r * 0.97f + 0.02f).coerceIn(0f, 1f)
+                                    fg = (g * 1.04f + 0.02f).coerceIn(0f, 1f)
+                                    fb = (b * 1.05f + 0.02f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.FUJI_CLASSIC_CHROME -> {
+                                    val dR = yL + (r - yL) * 0.78f
+                                    val dG = yL + (g - yL) * 0.82f
+                                    val dB = yL + (b - yL) * 0.76f
+                                    fr = (0.5f + (dR - 0.5f) * 1.14f).coerceIn(0f, 1f)
+                                    fg = (0.5f + (dG - 0.5f) * 1.12f).coerceIn(0f, 1f)
+                                    fb = (0.5f + (dB - 0.5f) * 1.08f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.CINESTILL_800T -> {
+                                    fr = (r * 0.94f + 0.12f * yL * yL).coerceIn(0f, 1f)
+                                    fg = (g * 1.01f + 0.02f * (1f - yL)).coerceIn(0f, 1f)
+                                    fb = (b * 1.14f + 0.05f * (1f - yL)).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.ILFORD_HP5_BW -> {
+                                    val bw = (0.04f + 0.92f * sqrt(yL) * 0.15f + 0.92f * yL * 0.85f).coerceIn(0f, 1f)
+                                    fr = bw; fg = bw; fb = bw
+                                }
+                                FilmStockPreset.KODAK_TRI_X_400 -> {
+                                    val sCurve = (yL * yL * (3f - 2f * yL)).coerceIn(0f, 1f)
+                                    fr = sCurve; fg = sCurve; fb = sCurve
+                                }
+                                FilmStockPreset.LEICA_MONOCHROM -> {
+                                    val redBw = (0.52f * r + 0.38f * g + 0.10f * b).coerceIn(0f, 1f)
+                                    val crisp = (0.5f + (redBw - 0.5f) * 1.22f).coerceIn(0f, 1f)
+                                    fr = crisp; fg = crisp; fb = crisp
+                                }
+                                FilmStockPreset.TEAL_ORANGE_CINE -> {
+                                    fr = (r + 0.14f * yL - 0.08f * (1f - yL)).coerceIn(0f, 1f)
+                                    fg = (g + 0.03f * yL + 0.03f * (1f - yL)).coerceIn(0f, 1f)
+                                    fb = (b - 0.12f * yL + 0.16f * (1f - yL)).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.BLEACH_BYPASS -> {
+                                    val silver = yL * yL * (3f - 2f * yL)
+                                    fr = (0.55f * silver + 0.45f * r).coerceIn(0f, 1f)
+                                    fg = (0.55f * silver + 0.45f * g).coerceIn(0f, 1f)
+                                    fb = (0.55f * silver + 0.45f * b).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.ELECTRIC_SLATE_NOCTURNE -> {
+                                    fr = (r * 0.92f + 0.06f * (1f - yL)).coerceIn(0f, 1f)
+                                    fg = (g * 0.95f + 0.04f * (1f - yL)).coerceIn(0f, 1f)
+                                    fb = (b * 1.12f + 0.10f * (1f - yL)).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.WARM_GOLDEN_HOUR -> {
+                                    fr = (r * 1.14f + 0.04f).coerceIn(0f, 1f)
+                                    fg = (g * 1.04f + 0.02f).coerceIn(0f, 1f)
+                                    fb = (b * 0.84f).coerceIn(0f, 1f)
+                                }
+                                FilmStockPreset.MATTE_ANALOG_FADE -> {
+                                    fr = (0.08f + r * 0.86f).coerceIn(0f, 1f)
+                                    fg = (0.07f + g * 0.86f).coerceIn(0f, 1f)
+                                    fb = (0.09f + b * 0.85f).coerceIn(0f, 1f)
+                                }
+                            }
+                            r += (fr - r) * filmStrength
+                            g += (fg - g) * filmStrength
+                            b += (fb - b) * filmStrength
+                        }
+
+                        // 8. Selective Radial / Linear Gradient Mask
+                        if (hasMask) {
+                            val nx = x.toFloat() / w.coerceAtLeast(1)
+                            val maskW = computeSelectiveMaskWeight(nx, ny, recipe)
+                            if (maskW > 1e-3f) {
+                                var mr = (r * maskExpMult + maskTempShift).coerceIn(0f, 1f)
+                                var mg = (g * maskExpMult).coerceIn(0f, 1f)
+                                var mb = (b * maskExpMult - maskTempShift).coerceIn(0f, 1f)
+                                if (abs(recipe.maskContrast) > 0.5f) {
+                                    mr = 0.5f + (mr - 0.5f) * maskContGamma
+                                    mg = 0.5f + (mg - 0.5f) * maskContGamma
+                                    mb = 0.5f + (mb - 0.5f) * maskContGamma
+                                }
+                                val mLuma = 0.299f * mr + 0.587f * mg + 0.114f * mb
+                                mr = (mLuma + (mr - mLuma) * maskSatMult).coerceIn(0f, 1f)
+                                mg = (mLuma + (mg - mLuma) * maskSatMult).coerceIn(0f, 1f)
+                                mb = (mLuma + (mb - mLuma) * maskSatMult).coerceIn(0f, 1f)
+
+                                r += (mr - r) * maskW
+                                g += (mg - g) * maskW
+                                b += (mb - b) * maskW
+                            }
+                        }
+
+                        // 9. Optical Vignette (O(1) LUT read)
+                        if (hasVignette) {
+                            val sumPow = dxPowLut[x] + dyPow
+                            val lutIdx = (sumPow * 256f).toInt().coerceIn(0, 512)
+                            val smoothFalloff = vigFalloffLut[lutIdx]
+                            if (vigAmt < 0f) {
+                                val factor = 1f + vigAmt * smoothFalloff
+                                r *= factor; g *= factor; b *= factor
+                            } else {
+                                r += (1f - r) * vigAmt * smoothFalloff
+                                g += (1f - g) * vigAmt * smoothFalloff
+                                b += (1f - b) * vigAmt * smoothFalloff
+                            }
+                        }
+
+                        // 10. Organic Silver-Halide Film Grain
+                        if (hasGrain) {
+                            val gx = (x / grainScale).toInt()
+                            val gy = (y / grainScale).toInt()
+                            val hash = ((gx * 73856093) xor (gy * 19349663) xor 0x5A17C3) and 0x7FFFFFFF
+                            val randNorm = ((hash % 2001) / 1000f) - 1f
+                            val yLum = 0.299f * r + 0.587f * g + 0.114f * b
+                            val emulsionWeight = 0.25f + 3f * yLum * (1f - yLum)
+                            val deltaG = randNorm * grainAmt * 0.18f * grainRough * emulsionWeight
+                            r = (r + deltaG).coerceIn(0f, 1f)
+                            g = (g + deltaG).coerceIn(0f, 1f)
+                            b = (b + deltaG).coerceIn(0f, 1f)
+                        }
+
+                        // 11. Creative Solarize & Posterize
+                        if (solarizeNorm > 1e-3f) {
+                            val thresh = 1f - solarizeNorm * 0.75f
+                            if (r > thresh) r = 1f - r
+                            if (g > thresh) g = 1f - g
+                            if (b > thresh) b = 1f - b
+                        }
+                        if (posterizeSteps < 64) {
+                            val stepsF = (posterizeSteps - 1).coerceAtLeast(1).toFloat()
+                            r = (r * stepsF + 0.5f).toInt() / stepsF
+                            g = (g * stepsF + 0.5f).toInt() / stepsF
+                            b = (b * stepsF + 0.5f).toInt() / stepsF
+                        }
+
+                        val ri = (r.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+                        val gi = (g.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+                        val bi = (b.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+                        pixels[idx] = (a shl 24) or (ri shl 16) or (gi shl 8) or bi
                     }
                 }
-
-                // 9. Optical Vignette (with Midpoint, Roundness & Feather)
-                if (abs(vigAmt) > 1e-3f) {
-                    val dxNorm = ((x.toFloat() / w.coerceAtLeast(1)) - 0.5f) * 2f
-                    val dist = (abs(dxNorm).pow(vigPower) + abs(dyNorm).pow(vigPower)).pow(1f / vigPower)
-                    val edge = ((dist - vigMid) / vigFeather.coerceAtLeast(0.08f)).coerceIn(0f, 1f)
-                    val smoothFalloff = edge * edge * (3f - 2f * edge)
-                    if (vigAmt < 0f) {
-                        val factor = 1f + vigAmt * smoothFalloff
-                        r *= factor; g *= factor; b *= factor
-                    } else {
-                        r += (1f - r) * vigAmt * smoothFalloff
-                        g += (1f - g) * vigAmt * smoothFalloff
-                        b += (1f - b) * vigAmt * smoothFalloff
-                    }
-                }
-
-                // 10. Organic Silver-Halide Film Grain
-                if (grainAmt > 1e-3f) {
-                    val gx = (x / grainScale).toInt()
-                    val gy = (y / grainScale).toInt()
-                    val hash = ((gx * 73856093) xor (gy * 19349663) xor 0x5A17C3) and 0x7FFFFFFF
-                    val randNorm = ((hash % 2001) / 1000f) - 1f // -1..+1
-                    val yLum = 0.299f * r + 0.587f * g + 0.114f * b
-                    val emulsionWeight = 0.25f + 3f * yLum * (1f - yLum)
-                    val deltaG = randNorm * grainAmt * 0.18f * grainRough * emulsionWeight
-                    r = (r + deltaG).coerceIn(0f, 1f)
-                    g = (g + deltaG).coerceIn(0f, 1f)
-                    b = (b + deltaG).coerceIn(0f, 1f)
-                }
-
-                // 11. Creative Solarize & Posterize
-                if (solarizeNorm > 1e-3f) {
-                    val thresh = 1f - solarizeNorm * 0.75f
-                    if (r > thresh) r = 1f - r
-                    if (g > thresh) g = 1f - g
-                    if (b > thresh) b = 1f - b
-                }
-                if (posterizeSteps < 64) {
-                    val stepsF = (posterizeSteps - 1).coerceAtLeast(1).toFloat()
-                    r = (r * stepsF).roundToInt() / stepsF
-                    g = (g * stepsF).roundToInt() / stepsF
-                    b = (b * stepsF).roundToInt() / stepsF
-                }
-
-                val ri = (r.coerceIn(0f, 1f) * 255f).roundToInt()
-                val gi = (g.coerceIn(0f, 1f) * 255f).roundToInt()
-                val bi = (b.coerceIn(0f, 1f) * 255f).roundToInt()
-                pixels[idx] = (a shl 24) or (ri shl 16) or (gi shl 8) or bi
-            }
+            })
         }
+        parallelPool.invokeAll(tasks)
 
         // Step 2: Spatial Detail Passes (Texture, Clarity, Edge-Masked Sharpening, Luma/Chroma Denoise, Halation Bloom)
         if (abs(recipe.texture) > 0.5f || abs(recipe.clarity) > 0.5f || recipe.sharpenAmount > 0.5f ||
@@ -887,16 +1063,21 @@ object PhotoEditorEngine {
             applyPrivacyRedactionRegions(pixels, w, h, recipe.redactionRegions)
         }
 
-        val outBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        outBitmap.setPixels(pixels, 0, w, 0, 0, w, h)
-        return outBitmap
+        val hist = if (computeHistogram) computeLiveHistogramFromPixels(pixels, w, h) else null
+        val outBitmap = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        return outBitmap to hist
     }
 
     /**
      * Applies Crop, Aspect Ratio lock, 90° Rotation, Straighten (-45..+45°), Flip H/V,
-     * 3D Vertical/Horizontal Keystone Homography, Anamorphic Stretch, and Radial Lens Distortion.
+     * 3D Vertical/Horizontal Keystone Homography, Anamorphic Stretch, and Radial Lens Distortion,
+     * returning the working IntArray pixel buffer and dimensions (w, h).
      */
-    private fun applyGeometryAndOptics(source: Bitmap, recipe: PhotoEditRecipe): Bitmap {
+    private fun applyGeometryAndOpticsPixels(
+        source: Bitmap,
+        recipe: PhotoEditRecipe,
+        cachedSourcePixels: IntArray? = null
+    ): Triple<IntArray, Int, Int> {
         val srcW = source.width.coerceAtLeast(1)
         val srcH = source.height.coerceAtLeast(1)
 
@@ -946,16 +1127,25 @@ object PhotoEditorEngine {
             abs(recipe.keystoneVertical) > 0.5f || abs(recipe.keystoneHorizontal) > 0.5f ||
             abs(recipe.anamorphicScaleX - 1f) > 0.01f || abs(recipe.lensDistortion) > 0.5f
 
-        if (!hasTransform) return source
+        if (!hasTransform) {
+            val outPixels = if (cachedSourcePixels != null && cachedSourcePixels.size == srcW * srcH) {
+                cachedSourcePixels.copyOf()
+            } else {
+                IntArray(srcW * srcH).also { source.getPixels(it, 0, srcW, 0, 0, srcW, srcH) }
+            }
+            return Triple(outPixels, srcW, srcH)
+        }
 
-        val srcPixels = IntArray(srcW * srcH)
-        source.getPixels(srcPixels, 0, srcW, 0, 0, srcW, srcH)
+        val srcPixels = if (cachedSourcePixels != null && cachedSourcePixels.size == srcW * srcH) {
+            cachedSourcePixels
+        } else {
+            IntArray(srcW * srcH).also { source.getPixels(it, 0, srcW, 0, 0, srcW, srcH) }
+        }
         val dstPixels = IntArray(outW * outH)
 
         val rad = Math.toRadians((-recipe.straightenDegrees - quarterTurns * 90f).toDouble()).toFloat()
         val cosA = cos(rad)
         val sinA = sin(rad)
-        // Auto-zoom scale when straightening so corners don't expose black triangles
         val straightenAbs = Math.toRadians(abs(recipe.straightenDegrees).toDouble()).toFloat()
         val autoZoom = (cos(straightenAbs) + sin(straightenAbs)).coerceAtLeast(1f)
 
@@ -964,70 +1154,74 @@ object PhotoEditorEngine {
         val kDist = (recipe.lensDistortion / 100f) * 0.32f
         val anamorphicInv = 1f / recipe.anamorphicScaleX.coerceIn(0.75f, 1.50f)
 
-        for (y in 0 until outH) {
-            val v = ((y + 0.5f) / outH) * 2f - 1f // -1..+1
-            for (x in 0 until outW) {
-                val u = ((x + 0.5f) / outW) * 2f - 1f // -1..+1
+        val numStrips = minOf(workerCount, outH.coerceAtLeast(1))
+        val rowsPerStrip = (outH + numStrips - 1) / numStrips
+        val tasks = ArrayList<Callable<Unit>>(numStrips)
 
-                // 1. Flip Horizontal / Vertical
-                var nx = if (recipe.flipHorizontal) -u else u
-                var ny = if (recipe.flipVertical) -v else v
+        for (strip in 0 until numStrips) {
+            val yStart = strip * rowsPerStrip
+            val yEnd = minOf(yStart + rowsPerStrip, outH)
+            if (yStart >= yEnd) continue
+            tasks.add(Callable {
+                for (y in yStart until yEnd) {
+                    val v = ((y + 0.5f) / outH) * 2f - 1f
+                    for (x in 0 until outW) {
+                        val u = ((x + 0.5f) / outW) * 2f - 1f
 
-                // 2. Anamorphic Aspect Scale X
-                nx *= anamorphicInv
+                        var nx = if (recipe.flipHorizontal) -u else u
+                        var ny = if (recipe.flipVertical) -v else v
 
-                // 3. 3D Keystone Perspective Homography
-                val denom = (1f + kv * ny + kh * nx).coerceAtLeast(0.25f)
-                nx /= denom
-                ny /= denom
+                        nx *= anamorphicInv
 
-                // 4. Radial Lens Barrel / Pincushion Distortion
-                if (abs(kDist) > 1e-4f) {
-                    val r2 = nx * nx + ny * ny
-                    val radialScale = (1f + kDist * r2 + 0.25f * kDist * kDist * r2 * r2).coerceIn(0.35f, 2.2f)
-                    nx *= radialScale
-                    ny *= radialScale
+                        val denom = (1f + kv * ny + kh * nx).coerceAtLeast(0.25f)
+                        nx /= denom
+                        ny /= denom
+
+                        if (abs(kDist) > 1e-4f) {
+                            val r2 = nx * nx + ny * ny
+                            val radialScale = (1f + kDist * r2 + 0.25f * kDist * kDist * r2 * r2).coerceIn(0.35f, 2.2f)
+                            nx *= radialScale
+                            ny *= radialScale
+                        }
+
+                        val rx = (nx * cosA - ny * sinA) / autoZoom
+                        val ry = (nx * sinA + ny * cosA) / autoZoom
+
+                        val srcFx = cropX + ((rx + 1f) * 0.5f) * (cropW - 1)
+                        val srcFy = cropY + ((ry + 1f) * 0.5f) * (cropH - 1)
+
+                        val ix = srcFx.toInt().coerceIn(0, srcW - 1)
+                        val iy = srcFy.toInt().coerceIn(0, srcH - 1)
+                        val ix1 = (ix + 1).coerceIn(0, srcW - 1)
+                        val iy1 = (iy + 1).coerceIn(0, srcH - 1)
+                        val fx = (srcFx - ix).coerceIn(0f, 1f)
+                        val fy = (srcFy - iy).coerceIn(0f, 1f)
+
+                        val c00 = srcPixels[iy * srcW + ix]
+                        val c10 = srcPixels[iy * srcW + ix1]
+                        val c01 = srcPixels[iy1 * srcW + ix]
+                        val c11 = srcPixels[iy1 * srcW + ix1]
+
+                        val w00 = (1f - fx) * (1f - fy)
+                        val w10 = fx * (1f - fy)
+                        val w01 = (1f - fx) * fy
+                        val w11 = fx * fy
+
+                        val r = (((c00 ushr 16) and 0xFF) * w00 + ((c10 ushr 16) and 0xFF) * w10 +
+                            ((c01 ushr 16) and 0xFF) * w01 + ((c11 ushr 16) and 0xFF) * w11 + 0.5f).toInt().coerceIn(0, 255)
+                        val g = (((c00 ushr 8) and 0xFF) * w00 + ((c10 ushr 8) and 0xFF) * w10 +
+                            ((c01 ushr 8) and 0xFF) * w01 + ((c11 ushr 8) and 0xFF) * w11 + 0.5f).toInt().coerceIn(0, 255)
+                        val b = ((c00 and 0xFF) * w00 + (c10 and 0xFF) * w10 +
+                            (c01 and 0xFF) * w01 + (c11 and 0xFF) * w11 + 0.5f).toInt().coerceIn(0, 255)
+
+                        dstPixels[y * outW + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                    }
                 }
-
-                // 5. Straighten + 90° Rotation with auto-zoom
-                val rx = (nx * cosA - ny * sinA) / autoZoom
-                val ry = (nx * sinA + ny * cosA) / autoZoom
-
-                // Map normalized [-1..+1] back into cropped source pixel space
-                val srcFx = cropX + ((rx + 1f) * 0.5f) * (cropW - 1)
-                val srcFy = cropY + ((ry + 1f) * 0.5f) * (cropH - 1)
-
-                val ix = srcFx.toInt().coerceIn(0, srcW - 1)
-                val iy = srcFy.toInt().coerceIn(0, srcH - 1)
-                val ix1 = (ix + 1).coerceIn(0, srcW - 1)
-                val iy1 = (iy + 1).coerceIn(0, srcH - 1)
-                val fx = (srcFx - ix).coerceIn(0f, 1f)
-                val fy = (srcFy - iy).coerceIn(0f, 1f)
-
-                val c00 = srcPixels[iy * srcW + ix]
-                val c10 = srcPixels[iy * srcW + ix1]
-                val c01 = srcPixels[iy1 * srcW + ix]
-                val c11 = srcPixels[iy1 * srcW + ix1]
-
-                val w00 = (1f - fx) * (1f - fy)
-                val w10 = fx * (1f - fy)
-                val w01 = (1f - fx) * fy
-                val w11 = fx * fy
-
-                val r = (((c00 ushr 16) and 0xFF) * w00 + ((c10 ushr 16) and 0xFF) * w10 +
-                    ((c01 ushr 16) and 0xFF) * w01 + ((c11 ushr 16) and 0xFF) * w11).roundToInt().coerceIn(0, 255)
-                val g = (((c00 ushr 8) and 0xFF) * w00 + ((c10 ushr 8) and 0xFF) * w10 +
-                    ((c01 ushr 8) and 0xFF) * w01 + ((c11 ushr 8) and 0xFF) * w11).roundToInt().coerceIn(0, 255)
-                val b = ((c00 and 0xFF) * w00 + (c10 and 0xFF) * w10 +
-                    (c01 and 0xFF) * w01 + (c11 and 0xFF) * w11).roundToInt().coerceIn(0, 255)
-
-                dstPixels[y * outW + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
+            })
         }
+        parallelPool.invokeAll(tasks)
 
-        val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        out.setPixels(dstPixels, 0, outW, 0, 0, outW, outH)
-        return out
+        return Triple(dstPixels, outW, outH)
     }
 
     /**
@@ -1056,86 +1250,101 @@ object PhotoEditorEngine {
         val chromaNr = (recipe.chromaDenoise / 100f).coerceIn(0f, 1f)
         val bloomAmt = (recipe.halationBloom / 100f).coerceIn(0f, 1f)
 
-        for (y in sharpStep until (h - sharpStep)) {
-            val row = y * w
-            val rowUp = (y - sharpStep) * w
-            val rowDn = (y + sharpStep) * w
+        val validStart = sharpStep
+        val validEnd = h - sharpStep
+        val validRows = (validEnd - validStart).coerceAtLeast(1)
+        val numStrips = minOf(workerCount, validRows)
+        val rowsPerStrip = (validRows + numStrips - 1) / numStrips
+        val tasks = ArrayList<Callable<Unit>>(numStrips)
 
-            for (x in sharpStep until (w - sharpStep)) {
-                val idx = row + x
-                val c = copy[idx]
-                var r = ((c ushr 16) and 0xFF) / 255f
-                var g = ((c ushr 8) and 0xFF) / 255f
-                var b = (c and 0xFF) / 255f
+        for (strip in 0 until numStrips) {
+            val yStart = validStart + strip * rowsPerStrip
+            val yEnd = minOf(yStart + rowsPerStrip, validEnd)
+            if (yStart >= yEnd) continue
+            tasks.add(Callable {
+                for (y in yStart until yEnd) {
+                    val row = y * w
+                    val rowUp = (y - sharpStep) * w
+                    val rowDn = (y + sharpStep) * w
 
-                val cL = copy[row + x - sharpStep]
-                val cR = copy[row + x + sharpStep]
-                val cU = copy[rowUp + x]
-                val cD = copy[rowDn + x]
+                    for (x in sharpStep until (w - sharpStep)) {
+                        val idx = row + x
+                        val c = copy[idx]
+                        var r = ((c ushr 16) and 0xFF) / 255f
+                        var g = ((c ushr 8) and 0xFF) / 255f
+                        var b = (c and 0xFF) / 255f
 
-                val rBlur = (((cL ushr 16) and 0xFF) + ((cR ushr 16) and 0xFF) + ((cU ushr 16) and 0xFF) + ((cD ushr 16) and 0xFF)) / (4f * 255f)
-                val gBlur = (((cL ushr 8) and 0xFF) + ((cR ushr 8) and 0xFF) + ((cU ushr 8) and 0xFF) + ((cD ushr 8) and 0xFF)) / (4f * 255f)
-                val bBlur = ((cL and 0xFF) + (cR and 0xFF) + (cU and 0xFF) + (cD and 0xFF)) / (4f * 255f)
+                        val cL = copy[row + x - sharpStep]
+                        val cR = copy[row + x + sharpStep]
+                        val cU = copy[rowUp + x]
+                        val cD = copy[rowDn + x]
 
-                val yCur = 0.299f * r + 0.587f * g + 0.114f * b
-                val yBlur = 0.299f * rBlur + 0.587f * gBlur + 0.114f * bBlur
-                val highFreq = yCur - yBlur
-                val edgeMag = abs(highFreq)
+                        val rBlur = (((cL ushr 16) and 0xFF) + ((cR ushr 16) and 0xFF) + ((cU ushr 16) and 0xFF) + ((cD ushr 16) and 0xFF)) / (4f * 255f)
+                        val gBlur = (((cL ushr 8) and 0xFF) + ((cR ushr 8) and 0xFF) + ((cU ushr 8) and 0xFF) + ((cD ushr 8) and 0xFF)) / (4f * 255f)
+                        val bBlur = ((cL and 0xFF) + (cR and 0xFF) + (cU and 0xFF) + (cD and 0xFF)) / (4f * 255f)
 
-                // Luma & Chroma Noise Reduction (bilateral edge-preserving smoothing)
-                if (lumaNr > 1e-3f && edgeMag < 0.12f) {
-                    val smoothW = lumaNr * (1f - (edgeMag / 0.12f))
-                    val yNew = yCur + (yBlur - yCur) * smoothW
-                    val dY = yNew - yCur
-                    r = (r + dY).coerceIn(0f, 1f)
-                    g = (g + dY).coerceIn(0f, 1f)
-                    b = (b + dY).coerceIn(0f, 1f)
+                        val yCur = 0.299f * r + 0.587f * g + 0.114f * b
+                        val yBlur = 0.299f * rBlur + 0.587f * gBlur + 0.114f * bBlur
+                        val highFreq = yCur - yBlur
+                        val edgeMag = abs(highFreq)
+
+                        // Luma & Chroma Noise Reduction (bilateral edge-preserving smoothing)
+                        if (lumaNr > 1e-3f && edgeMag < 0.12f) {
+                            val smoothW = lumaNr * (1f - (edgeMag / 0.12f))
+                            val yNew = yCur + (yBlur - yCur) * smoothW
+                            val dY = yNew - yCur
+                            r = (r + dY).coerceIn(0f, 1f)
+                            g = (g + dY).coerceIn(0f, 1f)
+                            b = (b + dY).coerceIn(0f, 1f)
+                        }
+                        if (chromaNr > 1e-3f) {
+                            val cbCur = b - yCur
+                            val crCur = r - yCur
+                            val cbBlur = bBlur - yBlur
+                            val crBlur = rBlur - yBlur
+                            val cbNew = cbCur + (cbBlur - cbCur) * chromaNr * 0.85f
+                            val crNew = crCur + (crBlur - crCur) * chromaNr * 0.85f
+                            r = (yCur + crNew).coerceIn(0f, 1f)
+                            b = (yCur + cbNew).coerceIn(0f, 1f)
+                        }
+
+                        // Texture, Clarity & Edge-Masked Sharpening
+                        var detailDelta = 0f
+                        if (abs(texAmt) > 1e-3f) {
+                            detailDelta += highFreq * texAmt
+                        }
+                        if (abs(clarAmt) > 1e-3f) {
+                            val midWeight = 4f * yCur * (1f - yCur)
+                            detailDelta += highFreq * clarAmt * midWeight
+                        }
+                        if (sharpAmt > 1e-3f && edgeMag >= edgeThresh) {
+                            val maskGain = ((edgeMag - edgeThresh) / (1f - edgeThresh).coerceAtLeast(0.1f)).coerceIn(0f, 1f)
+                            detailDelta += highFreq * sharpAmt * (0.35f + 0.65f * maskGain)
+                        }
+
+                        if (abs(detailDelta) > 1e-4f) {
+                            r = (r + detailDelta).coerceIn(0f, 1f)
+                            g = (g + detailDelta).coerceIn(0f, 1f)
+                            b = (b + detailDelta).coerceIn(0f, 1f)
+                        }
+
+                        // Halation / Pro-Mist Specular Highlight Bloom
+                        if (bloomAmt > 1e-3f && yBlur > 0.68f) {
+                            val glow = ((yBlur - 0.68f) / 0.32f) * bloomAmt * 0.42f
+                            r = (r + glow * 1.15f).coerceIn(0f, 1f)
+                            g = (g + glow * 0.62f).coerceIn(0f, 1f)
+                            b = (b + glow * 0.25f).coerceIn(0f, 1f)
+                        }
+
+                        val ri = (r * 255f + 0.5f).toInt().coerceIn(0, 255)
+                        val gi = (g * 255f + 0.5f).toInt().coerceIn(0, 255)
+                        val bi = (b * 255f + 0.5f).toInt().coerceIn(0, 255)
+                        pixels[idx] = (0xFF shl 24) or (ri shl 16) or (gi shl 8) or bi
+                    }
                 }
-                if (chromaNr > 1e-3f) {
-                    val cbCur = b - yCur
-                    val crCur = r - yCur
-                    val cbBlur = bBlur - yBlur
-                    val crBlur = rBlur - yBlur
-                    val cbNew = cbCur + (cbBlur - cbCur) * chromaNr * 0.85f
-                    val crNew = crCur + (crBlur - crCur) * chromaNr * 0.85f
-                    r = (yCur + crNew).coerceIn(0f, 1f)
-                    b = (yCur + cbNew).coerceIn(0f, 1f)
-                }
-
-                // Texture, Clarity & Edge-Masked Sharpening
-                var detailDelta = 0f
-                if (abs(texAmt) > 1e-3f) {
-                    detailDelta += highFreq * texAmt
-                }
-                if (abs(clarAmt) > 1e-3f) {
-                    val midWeight = 4f * yCur * (1f - yCur)
-                    detailDelta += highFreq * clarAmt * midWeight
-                }
-                if (sharpAmt > 1e-3f && edgeMag >= edgeThresh) {
-                    val maskGain = ((edgeMag - edgeThresh) / (1f - edgeThresh).coerceAtLeast(0.1f)).coerceIn(0f, 1f)
-                    detailDelta += highFreq * sharpAmt * (0.35f + 0.65f * maskGain)
-                }
-
-                if (abs(detailDelta) > 1e-4f) {
-                    r = (r + detailDelta).coerceIn(0f, 1f)
-                    g = (g + detailDelta).coerceIn(0f, 1f)
-                    b = (b + detailDelta).coerceIn(0f, 1f)
-                }
-
-                // Halation / Pro-Mist Specular Highlight Bloom
-                if (bloomAmt > 1e-3f && yBlur > 0.68f) {
-                    val glow = ((yBlur - 0.68f) / 0.32f) * bloomAmt * 0.42f
-                    r = (r + glow * 1.15f).coerceIn(0f, 1f)
-                    g = (g + glow * 0.62f).coerceIn(0f, 1f)
-                    b = (b + glow * 0.25f).coerceIn(0f, 1f)
-                }
-
-                val ri = (r * 255f).roundToInt().coerceIn(0, 255)
-                val gi = (g * 255f).roundToInt().coerceIn(0, 255)
-                val bi = (b * 255f).roundToInt().coerceIn(0, 255)
-                pixels[idx] = (0xFF shl 24) or (ri shl 16) or (gi shl 8) or bi
-            }
+            })
         }
+        parallelPool.invokeAll(tasks)
     }
 
     /**
@@ -1310,14 +1519,25 @@ object PhotoEditorEngine {
      * Computes live 64-bin R, G, B, Luma histogram + clipping percentages directly from a Bitmap.
      */
     fun computeLiveHistogram(bitmap: Bitmap): RgbHistogramData {
+        val w = bitmap.width.coerceAtLeast(1)
+        val h = bitmap.height.coerceAtLeast(1)
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        return computeLiveHistogramFromPixels(pixels, w, h)
+    }
+
+    /**
+     * Computes live 64-bin R, G, B, Luma histogram directly from an IntArray pixel buffer with zero JNI per-pixel overhead.
+     */
+    fun computeLiveHistogramFromPixels(pixels: IntArray, width: Int, height: Int): RgbHistogramData {
         val bins = 64
         val rHist = FloatArray(bins)
         val gHist = FloatArray(bins)
         val bHist = FloatArray(bins)
         val yHist = FloatArray(bins)
 
-        val w = bitmap.width.coerceAtLeast(1)
-        val h = bitmap.height.coerceAtLeast(1)
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
         val stepX = (w / 96).coerceAtLeast(1)
         val stepY = (h / 96).coerceAtLeast(1)
 
@@ -1327,9 +1547,10 @@ object PhotoEditorEngine {
 
         var py = 0
         while (py < h) {
+            val rowOffset = py * w
             var px = 0
             while (px < w) {
-                val c = bitmap.getPixel(px, py)
+                val c = pixels[rowOffset + px]
                 val r = (c ushr 16) and 0xFF
                 val g = (c ushr 8) and 0xFF
                 val b = c and 0xFF

@@ -2,7 +2,7 @@
 Last Updated: 2026-10-25
 
 ## Current Phase
-Phase 9 - ProPhotoEditorAndGestureViewer [Completed]
+Phase 10 - MediaConverterShareAndSyncedLyrics [Completed]
 
 ## Phases
 | Phase | Name                                 | Status      |
@@ -16,6 +16,7 @@ Phase 9 - ProPhotoEditorAndGestureViewer [Completed]
 | 7     | DeepExifCodecInspectorAndPrivateVault| Completed   |
 | 8     | ProductionHardeningAnd100Release     | Completed   |
 | 9     | ProPhotoEditorAndGestureViewer       | Completed   |
+| 10    | MediaConverterShareAndSyncedLyrics   | Completed   |
 
 ## Completed
 - [x] Initial project setup, Gradle build configuration, and Android.md design presets - Phase 1
@@ -29,6 +30,14 @@ Phase 9 - ProPhotoEditorAndGestureViewer [Completed]
 - [x] v1.1.0 Gesture-Driven Image Swiping (`A-001`): Horizontal 1-finger swipe left/right between photos with live drag offset and vertical swipe-down to dismiss in `PhotoCompareAndLoupeSheet.kt` - Phase 9
 - [x] v1.1.0 10-Module / 70+ Parameter Pro Photo Editor (`A-002`): Real mathematical pixel & geometry processing engine (`PhotoEditorEngine.kt`) and full-screen darkroom UI (`PhotoEditorSheet.kt`) with Live Scopes, Zebra Clipping, Before/After Split Curtain, Undo/Redo, Copy/Paste Recipe, and `MediaStore` export - Phase 9
 - [x] v1.1.1 New App Launcher Icon & GitHub Release Update (`A-001`): Updated adaptive and all density launcher icons (`Assets/Icons/photo_6262632732634584666_y.jpg`), rebuilt release APKs, and published to GitHub - Phase 9
+- [x] v1.1.2 Real-Time 60fps Photo Editor Rendering (`A-001`): Precomputed HSL/Grade/Tone/Vignette LUTs, multi-core scanline striping, direct `IntArray` histogram calculation, and dual-tier real-time preview pipeline - Phase 9
+- [x] v1.1.2 Video Player System Brightness Preservation (`A-002`): Preserve native system screen brightness by default when viewing videos instead of locking to max - Phase 5
+- [x] v1.1.2 Minimized Picture-in-Picture Mode (`A-003`): Minimize video into floating PiP mode (plus Android system PiP `RemoteAction` support) with only core buttons active (`Go Left`, `Play/Pause`, `Go Right`) - Phase 5
+- [x] v1.1.2 First-Time Vault Password Creation (`A-004`): Ask user to set a password on first Vault launch and immediately start the Vault without any default password - Phase 7
+- [x] v1.2.0 Synchronized Auto-Scrolling `.LRC` Lyrics Editor & Smooth Sleep Timer Fade-Out (`A-001`) - Phase 10
+- [x] v1.2.0 Video-to-MP3 / M4A / WAV Audio Converter with Progress Bar & Quality Selection (`A-002`) - Phase 10
+- [x] v1.2.0 Zero-Storage Live Playback Quality/FPS + On-Demand Hardware Multi-Res/Multi-FPS Video Transcoder (`A-003`) - Phase 10
+- [x] v1.2.0 Universal Android `"Share to..."` Integration across Photos, Videos, Music & Converted Media (`A-004`) - Phase 10
 
 ## In Progress
 
