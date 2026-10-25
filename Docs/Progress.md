@@ -28,6 +28,7 @@ Phase 9 - ProPhotoEditorAndGestureViewer [Completed]
 - [x] v1.0.2 Full-Screen Image Viewer UX Overhaul (`A-003`): Edge-to-edge full-screen image viewer (`fillMaxSize()`), 1-tap Fullscreen immersion toggle, double-tap/pinch zoom, Prev/Next photo navigation, scrollable chip bar (fixing `"Focus"` wrap), and `AppSlider` thumb inset fix - Phase 2 & 8
 - [x] v1.1.0 Gesture-Driven Image Swiping (`A-001`): Horizontal 1-finger swipe left/right between photos with live drag offset and vertical swipe-down to dismiss in `PhotoCompareAndLoupeSheet.kt` - Phase 9
 - [x] v1.1.0 10-Module / 70+ Parameter Pro Photo Editor (`A-002`): Real mathematical pixel & geometry processing engine (`PhotoEditorEngine.kt`) and full-screen darkroom UI (`PhotoEditorSheet.kt`) with Live Scopes, Zebra Clipping, Before/After Split Curtain, Undo/Redo, Copy/Paste Recipe, and `MediaStore` export - Phase 9
+- [x] v1.1.1 New App Launcher Icon & GitHub Release Update (`A-001`): Updated adaptive and all density launcher icons (`Assets/Icons/photo_6262632732634584666_y.jpg`), rebuilt release APKs, and published to GitHub - Phase 9
 
 ## In Progress
 

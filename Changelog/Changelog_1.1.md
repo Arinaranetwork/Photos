@@ -26,3 +26,8 @@ Banner: /Assets/Banners/PhotosBanner_1.1_2026-10-25.png
 - **Module 8 — Vignette, Silver-Halide Film Grain, Halation Bloom & Defringe (9 Parameters)**: Superellipse `Vignette Amount`, `Midpoint`, `Roundness`, and `Feather`, emulsion-weighted `Film Grain Amount`, `Grain Size`, and `Grain Roughness`, warm specular `Halation / Pro-Mist Highlight Bloom` (`0..100`), and `Chromatic Aberration Defringe` (`-100..+100`).
 - **Module 9 — Selective Masks & Privacy Redaction**: Interactive `Radial Spotlight` and `Linear Gradient` selective masks (`Mask Exposure`, `Mask Contrast`, `Mask Saturation`, `Mask Temp`, `Mask Radius`, `Mask Feather`, `Invert Mask`) plus tap-to-apply `Privacy Redaction` regions (`Pixelate Mosaic` & `Blur`).
 - **Module 10 — 16 Curated Film Stocks, Live Scopes & Non-Destructive MediaStore Export**: 16 film LUT profiles (`Portra 400`, `Gold 200`, `Ektar 100`, `Velvia 50`, `Pro 400H`, `Classic Chrome`, `Cinestill 800T`, `Ilford HP5`, `Tri-X 400`, `Leica Monochrom`, `Teal & Orange`, `Bleach Bypass`, `Nocturne`, `Golden Hour`, `Matte Fade`) with `0..100%` intensity, `Posterize` & `Solarize`, draggable **Before/After Split Curtain**, **Live RGB Histogram / RGB Parade / Clipping Readouts**, 20-step **Undo/Redo**, **Copy/Paste Edit Recipe**, and full-resolution `JPG 95%`, `JPG 100%`, `PNG`, and `WebP` export to `MediaStore`.
+
+## Patches
+
+### 1.1.1 (2026-10-25)
+- **Updated App Launcher Icon**: Replaced the legacy launcher icon across adaptive (`mipmap-anydpi-v26`) and all density buckets (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi` square & round) with the new Photos dual-peak mountain emblem (`Assets/Icons/photo_6262632732634584666_y.jpg`).
