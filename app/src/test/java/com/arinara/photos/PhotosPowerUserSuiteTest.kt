@@ -20,7 +20,16 @@ import com.arinara.photos.media.LoopTickDirective
 import com.arinara.photos.media.MultiQueueManager
 import com.arinara.photos.media.OutputSignalMode
 import com.arinara.photos.media.QueueSlot
+import com.arinara.photos.media.VideoAspectMode
 import com.arinara.photos.media.VideoTheaterEngine
+import com.arinara.photos.media.editor.EditorModule
+import com.arinara.photos.media.editor.FilmStockPreset
+import com.arinara.photos.media.editor.HslBandAdjustment
+import com.arinara.photos.media.editor.HslColorBand
+import com.arinara.photos.media.editor.PhotoEditRecipe
+import com.arinara.photos.media.editor.PhotoEditorEngine
+import com.arinara.photos.media.editor.RedactionRegion
+import com.arinara.photos.media.editor.SelectiveMaskType
 import com.arinara.photos.media.inspector.MediaInspectorAndVaultEngine
 import com.arinara.photos.media.trimmer.MediaTrimmerEngine
 import com.arinara.photos.media.trimmer.TrimCutMode
@@ -357,6 +366,10 @@ class PhotosPowerUserSuiteTest {
         val skippedPos = engine.computeSkipIntroTargetMs(currentPositionMs = 10_000L, durationMs = 1_200_000L, skipDeltaMs = 85_000L)
         assertEquals(95_000L, skippedPos)
 
+        // Default VideoAspectMode is FIT ("Original") to preserve native aspect ratio without stretching
+        assertEquals(VideoAspectMode.FIT, VideoAspectMode.values().first())
+        assertEquals("Original", VideoAspectMode.FIT.label)
+
         // Extra-Dim Brightness (-80%) and 200% Volume Boost math
         val extraDim = VideoTheaterEngine.applyBrightnessGestureDelta(currentLevel = -0.50f, deltaFraction = -0.60f)
         assertEquals(-0.80f, extraDim, 0.001f)
@@ -472,5 +485,77 @@ class PhotosPowerUserSuiteTest {
         val dupGroups = engine.findDuplicatesAndBurstGroups(sampleItems())
         assertTrue(dupGroups.isNotEmpty())
         assertTrue(dupGroups.first().reclaimableBytes > 0L)
+    }
+
+    @Test
+    fun `A-007 pro photo editor engine evaluates monotone cubic curves master tone LUT and 10 module recipe`() {
+        val defaultRecipe = PhotoEditRecipe()
+        assertEquals(0, defaultRecipe.activeParameterCount())
+
+        // Verify linear monotone cubic curve identity
+        assertEquals(0.0f, PhotoEditorEngine.evaluateMonotoneCubicCurve(PhotoEditRecipe.DEFAULT_CURVE_NODES, 0.0f), 0.005f)
+        assertEquals(0.5f, PhotoEditorEngine.evaluateMonotoneCubicCurve(PhotoEditRecipe.DEFAULT_CURVE_NODES, 0.5f), 0.005f)
+        assertEquals(1.0f, PhotoEditorEngine.evaluateMonotoneCubicCurve(PhotoEditRecipe.DEFAULT_CURVE_NODES, 1.0f), 0.005f)
+
+        // Verify S-Curve monotone cubic spline lifts highlights and deepens shadows
+        val sCurveNodes = listOf(0.0f, 0.16f, 0.50f, 0.84f, 1.0f)
+        assertTrue(PhotoEditorEngine.evaluateMonotoneCubicCurve(sCurveNodes, 0.25f) < 0.22f)
+        assertTrue(PhotoEditorEngine.evaluateMonotoneCubicCurve(sCurveNodes, 0.75f) > 0.78f)
+
+        // Verify 10-Module recipe parameter tracking and master tone LUT generation
+        val customHsl = PhotoEditRecipe.defaultHslBands().toMutableMap().apply {
+            put(HslColorBand.BLUE, HslBandAdjustment(hueShift = -18f, saturation = 25f, luminance = -20f))
+            put(HslColorBand.ORANGE, HslBandAdjustment(hueShift = 6f, saturation = 12f, luminance = 15f))
+        }
+        val proRecipe = PhotoEditRecipe(
+            straightenDegrees = 4.5f,
+            keystoneVertical = -18f,
+            lensDistortion = 12f,
+            exposureEv = 0.65f,
+            brilliance = 30f,
+            contrast = 20f,
+            contrastPivot = 0.45f,
+            highlights = -25f,
+            midtones = 12f,
+            shadows = 28f,
+            dehaze = 22f,
+            lumaCurveNodes = sCurveNodes,
+            parametricShadows = 10f,
+            parametricHighlights = -10f,
+            hslBands = customHsl,
+            shadowsHue = 215f,
+            shadowsSat = 24f,
+            highlightsHue = 42f,
+            highlightsSat = 18f,
+            temperature = 14f,
+            vibrance = 22f,
+            redPrimaryHue = 8f,
+            bluePrimarySat = 20f,
+            texture = 18f,
+            clarity = 24f,
+            sharpenAmount = 55f,
+            lumaDenoise = 20f,
+            vignetteAmount = -28f,
+            grainAmount = 16f,
+            halationBloom = 25f,
+            maskType = SelectiveMaskType.RADIAL_SPOTLIGHT,
+            maskExposureEv = 0.5f,
+            redactionRegions = listOf(RedactionRegion(0.5f, 0.5f, 0.1f)),
+            filmStock = FilmStockPreset.CINESTILL_800T,
+            filmIntensity = 80f
+        )
+
+        assertTrue(proRecipe.activeParameterCount() >= 25)
+        val lut = PhotoEditorEngine.buildMasterToneLut(proRecipe)
+        assertEquals(256, lut.size)
+        // Positive exposure + brilliance + shadows lift should raise mid-shadow tone above linear 64/255 (0.251)
+        assertTrue(lut[64] > 0.30f)
+
+        // Resetting individual modules leaves other modules intact
+        val resetLight = proRecipe.resetModule(EditorModule.LIGHT)
+        assertEquals(0f, resetLight.exposureEv, 0.001f)
+        assertEquals(0f, resetLight.dehaze, 0.001f)
+        assertEquals(4.5f, resetLight.straightenDegrees, 0.001f)
+        assertEquals(FilmStockPreset.CINESTILL_800T, resetLight.filmStock)
     }
 }

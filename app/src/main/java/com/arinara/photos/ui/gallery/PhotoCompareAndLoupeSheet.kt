@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -86,6 +87,7 @@ import com.arinara.photos.ui.theme.jigglePressClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class PhotoCompareMode(val label: String) {
@@ -103,7 +105,8 @@ fun PhotoCompareAndLoupeSheet(
     onOpenInspector: (MediaItem) -> Unit,
     onRecordVoiceNote: (MediaItem) -> Unit,
     onPlayVoiceNote: (MediaItem) -> Unit,
-    onSelectPhoto: (MediaItem) -> Unit = {}
+    onSelectPhoto: (MediaItem) -> Unit = {},
+    onOpenEditor: (MediaItem) -> Unit = {}
 ) {
     if (!visible || primaryItem == null) return
 
@@ -112,6 +115,8 @@ fun PhotoCompareAndLoupeSheet(
     var syncZoomLocked by remember { mutableStateOf(true) }
     var sharedZoomScale by remember { mutableFloatStateOf(1f) }
     var sharedPanOffset by remember { mutableStateOf(Offset.Zero) }
+    var swipeOffsetX by remember { mutableFloatStateOf(0f) }
+    var swipeOffsetY by remember { mutableFloatStateOf(0f) }
 
     var isImmersedFullscreen by remember { mutableStateOf(false) }
     var loupeEnabled by remember { mutableStateOf(false) }
@@ -151,6 +156,11 @@ fun PhotoCompareAndLoupeSheet(
     val currentLoupeEnabled by rememberUpdatedState(loupeEnabled)
     val currentLoupePos by rememberUpdatedState(loupePositionFraction)
     val currentImmersed by rememberUpdatedState(isImmersedFullscreen)
+    val currentPhotoList by rememberUpdatedState(photoList)
+    val currentActivePhotoIndex by rememberUpdatedState(activePhotoIndex)
+    val currentCompareMode by rememberUpdatedState(compareMode)
+    val currentSwipeX by rememberUpdatedState(swipeOffsetX)
+    val currentSwipeY by rememberUpdatedState(swipeOffsetY)
 
     // Full-Screen Edge-to-Edge Immersive Image Viewer
     Box(
@@ -158,7 +168,7 @@ fun PhotoCompareAndLoupeSheet(
             .fillMaxSize()
             .background(ElectricSlateTokens.BgCanvas)
     ) {
-        // Full-Screen Interactive Photo Viewport
+        // Full-Screen Interactive Photo Viewport (Supports 1-Finger Swipe Next/Prev & Swipe-Down Dismiss at 1.0x Zoom)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -184,12 +194,69 @@ fun PhotoCompareAndLoupeSheet(
                     )
                 }
                 .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = {
+                            swipeOffsetX = 0f
+                            swipeOffsetY = 0f
+                        },
+                        onDragCancel = {
+                            swipeOffsetX = 0f
+                            swipeOffsetY = 0f
+                        },
+                        onDragEnd = {
+                            val w = size.width.coerceAtLeast(1).toFloat()
+                            val list = currentPhotoList
+                            val idx = currentActivePhotoIndex
+                            if (currentZoom <= 1.03f && !currentLoupeEnabled && currentCompareMode == PhotoCompareMode.SINGLE_PRO) {
+                                val dx = currentSwipeX
+                                val dy = currentSwipeY
+                                if (dy > 110.dp.toPx() && abs(dy) > abs(dx) * 1.15f) {
+                                    swipeOffsetX = 0f
+                                    swipeOffsetY = 0f
+                                    onDismiss()
+                                    return@detectDragGestures
+                                }
+                                if (list.size > 1 && abs(dx) > w * 0.16f && abs(dx) >= abs(dy)) {
+                                    val targetIdx = if (dx < 0f) {
+                                        (idx + 1) % list.size
+                                    } else {
+                                        if (idx - 1 < 0) list.lastIndex else idx - 1
+                                    }
+                                    val nextPhoto = list[targetIdx]
+                                    activeItem = nextPhoto
+                                    onSelectPhoto(nextPhoto)
+                                    sharedZoomScale = 1f
+                                    sharedPanOffset = Offset.Zero
+                                }
+                            }
+                            swipeOffsetX = 0f
+                            swipeOffsetY = 0f
+                        },
+                        onDrag = { change, dragAmount ->
+                            if (currentLoupeEnabled) {
+                                change.consume()
+                                val fx = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
+                                val fy = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
+                                loupePositionFraction = Offset(fx, fy)
+                            } else if (currentZoom <= 1.03f && currentCompareMode == PhotoCompareMode.SINGLE_PRO) {
+                                change.consume()
+                                swipeOffsetX = (currentSwipeX + dragAmount.x).coerceIn(-size.width.toFloat(), size.width.toFloat())
+                                swipeOffsetY = (currentSwipeY + dragAmount.y).coerceIn(-220f, 420f)
+                            } else if (currentZoom > 1.03f) {
+                                change.consume()
+                                val maxPanX = (size.width * (currentZoom - 1f) * 0.5f).coerceAtLeast(120f)
+                                val maxPanY = (size.height * (currentZoom - 1f) * 0.5f).coerceAtLeast(120f)
+                                sharedPanOffset = Offset(
+                                    x = (currentPan.x + dragAmount.x).coerceIn(-maxPanX, maxPanX),
+                                    y = (currentPan.y + dragAmount.y).coerceIn(-maxPanY, maxPanY)
+                                )
+                            }
+                        }
+                    )
+                }
+                .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        if (currentLoupeEnabled && zoom == 1f) {
-                            val newX = (currentLoupePos.x + pan.x / size.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
-                            val newY = (currentLoupePos.y + pan.y / size.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
-                            loupePositionFraction = Offset(newX, newY)
-                        } else {
+                        if (zoom != 1f) {
                             val newZoom = (currentZoom * zoom).coerceIn(1f, 8f)
                             sharedZoomScale = newZoom
                             if (newZoom > 1.01f) {
@@ -205,23 +272,16 @@ fun PhotoCompareAndLoupeSheet(
                         }
                     }
                 }
-                .pointerInput(Unit) {
-                    detectDragGestures { change, _ ->
-                        if (currentLoupeEnabled) {
-                            change.consume()
-                            val fx = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
-                            val fy = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
-                            loupePositionFraction = Offset(fx, fy)
-                        }
-                    }
-                }
         ) {
             when (compareMode) {
                 PhotoCompareMode.SINGLE_PRO -> {
                     PhotoViewportTile(
                         item = compareItems.first(),
                         zoomScale = sharedZoomScale,
-                        panOffset = sharedPanOffset,
+                        panOffset = Offset(
+                            x = sharedPanOffset.x + swipeOffsetX,
+                            y = sharedPanOffset.y + (swipeOffsetY * 0.35f)
+                        ),
                         focusPeaking = focusPeakingEnabled,
                         loupeEnabled = loupeEnabled,
                         loupeFraction = currentLoupePos,
@@ -415,13 +475,28 @@ fun PhotoCompareAndLoupeSheet(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(ElectricSlateTokens.SurfacePanel.copy(alpha = 0.88f))
+                            .jigglePressClickable { onOpenEditor(activeItem) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Tune,
+                            contentDescription = "Edit Photo",
+                            tint = ElectricSlateTokens.PrimaryAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(ElectricSlateTokens.SurfacePanel.copy(alpha = 0.88f))
                             .jigglePressClickable { isImmersedFullscreen = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Fullscreen,
                             contentDescription = "Fullscreen",
-                            tint = ElectricSlateTokens.PrimaryAccent,
+                            tint = ElectricSlateTokens.TextPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -579,10 +654,18 @@ fun PhotoCompareAndLoupeSheet(
                                 )
                             }
                             AppButton(
+                                text = "Edit",
+                                leadingIcon = Icons.Outlined.Tune,
+                                onClick = { onOpenEditor(activeItem) },
+                                variant = AppButtonVariant.PRIMARY,
+                                height = 38.dp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            AppButton(
                                 text = "Details",
                                 leadingIcon = Icons.Outlined.Info,
                                 onClick = { onOpenInspector(activeItem) },
-                                variant = AppButtonVariant.PRIMARY,
+                                variant = AppButtonVariant.SECONDARY,
                                 height = 38.dp,
                                 modifier = Modifier.weight(1f)
                             )

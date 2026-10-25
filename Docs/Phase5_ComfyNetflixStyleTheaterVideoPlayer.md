@@ -7,7 +7,7 @@ Build the Comfy Netflix-Style Theater Video Player featuring the "Continue Watch
 - `ContinueWatchingRepository` tracking playback progress, remaining duration, and per-folder Intro/Outro auto-skip rules.
 - `EpisodeSeriesAnalyzer` grouping numbered files in folders into an in-player Episodes drawer and powering the 5-second Auto-Play Next Episode countdown card.
 - `SubtitleTranscriptEngine` parsing `.SRT`, `.VTT`, and `.ASS` files for simultaneous Dual Subtitles (Bottom Primary + Top Secondary) and the searchable, clickable Subtitle Transcript Sidebar.
-- `VideoTheaterScreen` with Bedtime Touch Lock, Hold-for-`2.0x` speed, dual-zone vertical gestures (Brightness down to `-80%` Extra Dim + Volume up to `200%`), double-tap `-10s`/`+10s` ripple, Ambient Cinema Glow, 800% pinch zoom, `-1f`/`+1f` frame step, horizontal mirror flip, PiP, and 1-tap Background Audio handoff.
+- `VideoTheaterScreen` (`VideoTheaterSheet`) with Full-Screen Immersive mode (`fillMaxSize()`), native original aspect ratio & uncompressed resolution (`VideoAspectMode.FIT` / `RESIZE_MODE_FIT` default + `clearVideoSizeConstraints()`), 1-tap Fullscreen immersion toggle, Bedtime Touch Lock, Hold-for-`2.0x` speed, dual-zone vertical gestures (real hardware `WindowManager.LayoutParams.screenBrightness` + software dimming down to `-80%` Extra Dim, and `AudioManager` + `LoudnessEnhancer` volume boost up to `200%`), double-tap `-10s`/`+10s` ripple, 800% pinch zoom, `-1f`/`+1f` frame step, horizontal mirror flip, PiP, and 1-tap Background Audio handoff.
 - `VideoStoryboardGenerator` exporting a `4x4` thumbnail contact sheet PNG with metadata and timestamps.
 
 ## Out Of Scope

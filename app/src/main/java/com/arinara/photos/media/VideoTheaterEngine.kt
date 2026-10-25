@@ -49,8 +49,8 @@ data class VideoSceneBookmark(
 )
 
 enum class VideoAspectMode(val label: String) {
-    FIT("Fit"),
-    FILL_CROP("Fill"),
+    FIT("Original"),
+    FILL_CROP("Zoom Crop"),
     RATIO_16_9("16:9"),
     RATIO_21_9("21:9 Cinema"),
     RATIO_4_3("4:3")

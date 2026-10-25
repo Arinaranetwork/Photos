@@ -100,6 +100,7 @@ import com.arinara.photos.media.VideoTheaterEngine
 import com.arinara.photos.media.inspector.DeepMediaInspectionReport
 import com.arinara.photos.media.inspector.DuplicateGroup
 import com.arinara.photos.media.inspector.MediaInspectorAndVaultEngine
+import com.arinara.photos.media.editor.PhotoEditRecipe
 import com.arinara.photos.media.trimmer.MediaTrimmerEngine
 import com.arinara.photos.theme.ElmsSans
 import com.arinara.photos.ui.components.presets.AppButton
@@ -117,6 +118,7 @@ import com.arinara.photos.ui.components.presets.AppPillChip
 import com.arinara.photos.ui.components.presets.AppScreen
 import com.arinara.photos.ui.components.presets.AppTopBar
 import com.arinara.photos.ui.gallery.PhotoCompareAndLoupeSheet
+import com.arinara.photos.ui.gallery.PhotoEditorSheet
 import com.arinara.photos.ui.inspector.InspectorTab
 import com.arinara.photos.ui.inspector.MediaInspectorAndVaultSheet
 import com.arinara.photos.ui.player.AudioEqStudioSheet
@@ -182,6 +184,10 @@ fun HomeScreen(
     // Active Modal Sheets
     var showPhotoCompareSheet by remember { mutableStateOf(false) }
     var selectedPhotoItem by remember { mutableStateOf<MediaItem?>(null) }
+
+    var showPhotoEditorSheet by remember { mutableStateOf(false) }
+    var editorTargetItem by remember { mutableStateOf<MediaItem?>(null) }
+    var copiedPhotoEditRecipe by remember { mutableStateOf<PhotoEditRecipe?>(null) }
 
     var showAudiophilePlayerSheet by remember { mutableStateOf(false) }
     var showEqStudioSheet by remember { mutableStateOf(false) }
@@ -448,6 +454,7 @@ fun HomeScreen(
     }
 
     val isAnySheetOpen = showPhotoCompareSheet ||
+        showPhotoEditorSheet ||
         showAudiophilePlayerSheet ||
         showEqStudioSheet ||
         showVideoTheaterSheet ||
@@ -1119,7 +1126,37 @@ fun HomeScreen(
                 },
                 onRecordVoiceNote = {},
                 onPlayVoiceNote = {},
-                onSelectPhoto = { selectedPhotoItem = it }
+                onSelectPhoto = { selectedPhotoItem = it },
+                onOpenEditor = { item ->
+                    showPhotoCompareSheet = false
+                    editorTargetItem = item
+                    showPhotoEditorSheet = true
+                }
+            )
+        }
+
+        // 1B. Full-Screen 10-Module / 70+ Parameter Pro Photo Editor Sheet
+        if (showPhotoEditorSheet) {
+            PhotoEditorSheet(
+                visible = true,
+                targetItem = editorTargetItem,
+                copiedRecipe = copiedPhotoEditRecipe,
+                onCopyRecipe = { recipe ->
+                    copiedPhotoEditRecipe = recipe
+                    statusNoticeText = "Copied edit recipe (${recipe.activeParameterCount()} parameters)"
+                },
+                onDismiss = {
+                    showPhotoEditorSheet = false
+                    showPhotoCompareSheet = editorTargetItem != null
+                },
+                onExportedPhoto = { exportedItem, summaryMsg ->
+                    mediaRepository.addOrUpdateMediaItem(exportedItem)
+                    selectedPhotoItem = exportedItem
+                    editorTargetItem = exportedItem
+                    showPhotoEditorSheet = false
+                    showPhotoCompareSheet = true
+                    statusNoticeText = summaryMsg
+                }
             )
         }
 
@@ -1362,10 +1399,14 @@ fun HomeScreen(
                     activeVideoItem?.let { videoTheaterEngine.addSceneBookmark(it.id, videoPositionMs, caption) }
                 },
                 onCaptureFramePng = { vid, tsMs ->
-                    val outDir = File(context.filesDir, "captures")
-                    val frameItem = mediaTrimmerEngine.captureVideoFrameStill(outDir, vid, tsMs, losslessPng = true)
-                    mediaRepository.addOrUpdateMediaItem(frameItem)
-                    statusNoticeText = "Saved frame: ${frameItem.title}"
+                    coroutineScope.launch {
+                        val outDir = File(context.filesDir, "captures")
+                        val frameItem = withContext(Dispatchers.IO) {
+                            mediaTrimmerEngine.captureVideoFrameStill(outDir, vid, tsMs, losslessPng = true)
+                        }
+                        mediaRepository.addOrUpdateMediaItem(frameItem)
+                        statusNoticeText = "Saved frame: ${frameItem.title}"
+                    }
                 },
                 onGenerateStoryboard = {},
                 onHandOffToBackgroundAudio = { vid, posMs ->

@@ -11,6 +11,7 @@ import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
+import android.media.MediaMetadataRetriever
 import com.arinara.photos.data.model.AudioQualityTier
 import com.arinara.photos.data.model.MediaItem
 import com.arinara.photos.data.model.MediaType
@@ -180,31 +181,61 @@ class MediaTrimmerEngine {
         val cleanBase = videoItem.title.replace(Regex("""[^a-zA-Z0-9_\-]"""), "_").take(32)
         val outFile = File(outputDir, "${cleanBase}_Frame_${timestampMs}ms.${ext.lowercase()}")
 
-        val w = (videoItem.width.takeIf { it in 320..3840 } ?: 1920).coerceAtMost(1920)
-        val h = (videoItem.height.takeIf { it in 240..2160 } ?: 1080).coerceAtMost(1080)
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                0f, 0f, w.toFloat(), h.toFloat(),
-                intArrayOf(0xFF0D1117.toInt(), 0xFF7A5AF8.toInt(), 0xFF1F2736.toInt()),
-                floatArrayOf(0f, 0.5f, 1f),
-                Shader.TileMode.CLAMP
+        val extractedFrame: Bitmap? = try {
+            val f = File(videoItem.filePath)
+            if (f.exists()) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(f.absolutePath)
+                    retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                        ?: retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                } finally {
+                    try {
+                        retriever.release()
+                    } catch (_: Throwable) {
+                    }
+                }
+            } else {
+                null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+
+        val w: Int
+        val h: Int
+        val bmp: Bitmap
+        if (extractedFrame != null) {
+            bmp = extractedFrame
+            w = extractedFrame.width
+            h = extractedFrame.height
+        } else {
+            w = (videoItem.width.takeIf { it in 320..3840 } ?: 1920).coerceAtMost(1920)
+            h = (videoItem.height.takeIf { it in 240..2160 } ?: 1080).coerceAtMost(1080)
+            bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, w.toFloat(), h.toFloat(),
+                    intArrayOf(0xFF0D1117.toInt(), 0xFF7A5AF8.toInt(), 0xFF1F2736.toInt()),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bgPaint)
+
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFFF8FAFC.toInt()
+                textSize = 42f
+                isFakeBoldText = true
+            }
+            canvas.drawText(
+                "FRAME CAPTURE @ ${MediaItem.formatDurationMillis(timestampMs)} — ${videoItem.title}",
+                64f,
+                h - 80f,
+                textPaint
             )
         }
-        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bgPaint)
-
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFFF8FAFC.toInt()
-            textSize = 42f
-            isFakeBoldText = true
-        }
-        canvas.drawText(
-            "FRAME CAPTURE @ ${MediaItem.formatDurationMillis(timestampMs)} — ${videoItem.title}",
-            64f,
-            h - 80f,
-            textPaint
-        )
 
         FileOutputStream(outFile).use { fos ->
             bmp.compress(
