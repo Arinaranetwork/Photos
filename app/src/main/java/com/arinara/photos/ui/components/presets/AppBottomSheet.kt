@@ -204,12 +204,12 @@ fun AppBottomSheet(
                     }
                 }
             } else {
-                // Minimized floating pill bar at bottom edge
+                // Minimized floating pill bar positioned cleanly above the bottom navigation bar
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(bottom = 16.dp, start = 20.dp, end = 20.dp),
+                        .padding(bottom = 156.dp, start = 20.dp, end = 20.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
@@ -217,7 +217,7 @@ fun AppBottomSheet(
                             .clip(CircleShape)
                             .background(ElectricSlateTokens.SurfaceElevated)
                             .jigglePressClickable { onMinimizedChange?.invoke(false) }
-                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
@@ -234,6 +234,15 @@ fun AppBottomSheet(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp,
                             color = ElectricSlateTokens.TextPrimary
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = ElectricSlateTokens.TextMuted,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .jigglePressClickable(onClick = onDismiss)
                         )
                     }
                 }

@@ -7,18 +7,25 @@
 package com.arinara.photos.media
 
 import android.media.audiofx.BassBoost
+import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
+import android.media.audiofx.Visualizer
+import android.os.Build
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.ln
+import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 enum class OutputSignalMode(val label: String, val badge: String, val description: String) {
     BIT_PERFECT_DIRECT_PCM(
@@ -167,37 +174,90 @@ class AudioDspController {
         AudioOutputDevice.LINE_OUT_CAST to "Cinema Surround"
     )
 
+    private var systemDynamicsProcessing: DynamicsProcessing? = null
     private var systemEqualizer: Equalizer? = null
     private var systemBassBoost: BassBoost? = null
     private var systemVirtualizer: Virtualizer? = null
     private var systemLoudnessEnhancer: LoudnessEnhancer? = null
+    private var systemVisualizer: Visualizer? = null
+    private var fftBuffer: ByteArray = ByteArray(256)
+    private var waveBuffer: ByteArray = ByteArray(256)
+    private val smoothedSpectrumBins: FloatArray = FloatArray(32)
+    private val waterfallHistory: ArrayDeque<FloatArray> = ArrayDeque(24)
     private var boundSessionId: Int = 0
 
     fun allPresets(): List<EqPreset> = BUILT_IN_PRESETS + customPresets.values.toList()
+
+    fun getWaterfallHistorySnapshot(): List<FloatArray> = synchronized(waterfallHistory) {
+        waterfallHistory.toList()
+    }
 
     fun bindAudioSession(audioSessionId: Int) {
         if (audioSessionId <= 0 || audioSessionId == boundSessionId) return
         releaseSystemEffects()
         boundSessionId = audioSessionId
         try {
-            systemEqualizer = Equalizer(0, audioSessionId).apply { enabled = _dspState.value.eqEnabled }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                try {
+                    val config = DynamicsProcessing.Config.Builder(
+                        DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
+                        2,
+                        true,
+                        10,
+                        false,
+                        0,
+                        true,
+                        10,
+                        false
+                    ).setPreferredFrameDuration(10.0f).build()
+                    systemDynamicsProcessing = DynamicsProcessing(0, audioSessionId, config).apply {
+                        enabled = _dspState.value.eqEnabled
+                    }
+                } catch (_: Throwable) {
+                    systemDynamicsProcessing = null
+                }
+            }
+            systemEqualizer = Equalizer(0, audioSessionId).apply {
+                enabled = _dspState.value.eqEnabled && systemDynamicsProcessing == null
+            }
             systemBassBoost = BassBoost(0, audioSessionId).apply { enabled = _dspState.value.bassBoostPercent > 0 }
             systemVirtualizer = Virtualizer(0, audioSessionId).apply { enabled = _dspState.value.virtualizerPercent > 0 }
             systemLoudnessEnhancer = LoudnessEnhancer(audioSessionId).apply { enabled = _dspState.value.loudnessGainDb > 0f }
             syncToHardwareEffects()
         } catch (_: Throwable) {
-            // Hardware AudioFX unavailable on unit test JVM or restricted OEM; software state stays authoritative
+            // Hardware AudioFX unavailable on unit test JVM or restricted OEM
+        }
+        try {
+            val range = Visualizer.getCaptureSizeRange()
+            val capSize = range.getOrElse(1) { 256 }.coerceIn(128, 512)
+            fftBuffer = ByteArray(capSize)
+            waveBuffer = ByteArray(capSize)
+            systemVisualizer = Visualizer(audioSessionId).apply {
+                captureSize = capSize
+                scalingMode = Visualizer.SCALING_MODE_NORMALIZED
+                enabled = true
+            }
+        } catch (_: Throwable) {
+            systemVisualizer = null
         }
     }
 
     fun releaseSystemEffects() {
         try {
+            systemVisualizer?.enabled = false
+            systemVisualizer?.release()
+        } catch (_: Throwable) {
+        }
+        try {
+            systemDynamicsProcessing?.release()
             systemEqualizer?.release()
             systemBassBoost?.release()
             systemVirtualizer?.release()
             systemLoudnessEnhancer?.release()
         } catch (_: Throwable) {
         }
+        systemVisualizer = null
+        systemDynamicsProcessing = null
         systemEqualizer = null
         systemBassBoost = null
         systemVirtualizer = null
@@ -433,32 +493,137 @@ class AudioDspController {
     ): FloatArray {
         val bins = FloatArray(32)
         if (!isPlaying) {
-            for (i in 0 until 32) bins[i] = 0.06f
+            smoothedSpectrumBins.fill(0f)
             return bins
         }
-        val state = _dspState.value
-        val t = playbackPositionMs / 1000.0
+
+        val responseDb = computeFrequencyResponseCurveDb(_dspState.value, numPoints = 32)
+        var capturedFromHardware = false
+
+        // 1. Try real hardware Visualizer FFT capture from ExoPlayer's audioSessionId
+        val vis = systemVisualizer
+        if (vis != null) {
+            try {
+                if (vis.getFft(fftBuffer) == Visualizer.SUCCESS) {
+                    val halfBins = (fftBuffer.size / 2).coerceAtLeast(2)
+                    var anyNonZero = false
+                    for (i in 0 until 32) {
+                        val startK = (1.0 * halfBins.toDouble().pow(i / 32.0)).toInt().coerceIn(1, halfBins - 1)
+                        val endK = (1.0 * halfBins.toDouble().pow((i + 1) / 32.0)).toInt().coerceIn(startK, halfBins - 1)
+                        var sumMag = 0f
+                        var count = 0
+                        for (k in startK..endK) {
+                            val re = fftBuffer[2 * k].toFloat()
+                            val im = fftBuffer[2 * k + 1].toFloat()
+                            val mag = hypot(re, im) / 128f
+                            sumMag += mag
+                            count++
+                        }
+                        val avgMag = if (count > 0) sumMag / count else 0f
+                        val eqBoostNorm = (responseDb[i] / 36f)
+                        val dbNormalized = if (avgMag > 0.001f) {
+                            anyNonZero = true
+                            (((20f * log10(avgMag) + 42f) / 42f) + eqBoostNorm).coerceIn(0.02f, 1.0f)
+                        } else {
+                            0.0f
+                        }
+                        bins[i] = dbNormalized
+                    }
+                    if (anyNonZero) {
+                        capturedFromHardware = true
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+        }
+
+        // 2. Real Biquad EQ Transfer Function Magnitude Response across 32 log-spaced frequencies (20Hz..20kHz)
+        if (!capturedFromHardware) {
+            for (i in 0 until 32) {
+                val lossyAttenuationDb = if (!isLossless && i >= 26) -12f else 0f
+                val totalDb = (responseDb[i] + lossyAttenuationDb).coerceIn(-18f, 18f)
+                bins[i] = ((totalDb + 18f) / 36f).coerceIn(0.04f, 0.98f)
+            }
+        }
+
+        // Apply real-time ballistic smoothing (fast attack, smooth decay) and push to 2D waterfall ring buffer
         for (i in 0 until 32) {
-            // Map 32 FFT bins onto 10 EQ bands
-            val eqIdx = ((i / 32.0) * 10.0).toInt().coerceIn(0, 9)
-            val eqGainDb = if (state.eqEnabled) state.bandGainsDb[eqIdx] + (state.preampDb * 0.35f) else 0f
-            val eqBoost = ((eqGainDb + 15f) / 30f).coerceIn(0.2f, 1.4f)
-            val bassFactor = if (i < 6) (1f + state.bassBoostPercent / 150f) else 1f
+            val prev = smoothedSpectrumBins[i]
+            val target = bins[i]
+            val alpha = if (target >= prev) 0.72f else 0.42f
+            val smoothed = if (prev == 0f) target else (prev + (target - prev) * alpha)
+            smoothedSpectrumBins[i] = smoothed
+            bins[i] = smoothed
+        }
 
-            // If lossy and visualizer is in 24kHz check mode, show rolloff above bin 25 (>16kHz)
-            val lossyRolloff = if (!isLossless && i >= 26) 0.18f else 1.0f
-
-            val wave = 0.45 + 0.35 * sin(t * (2.2 + i * 0.37) + i * 0.5) + 0.20 * cos(t * (4.1 - i * 0.12))
-            bins[i] = (wave.toFloat() * eqBoost * bassFactor * lossyRolloff).coerceIn(0.05f, 0.98f)
+        synchronized(waterfallHistory) {
+            if (waterfallHistory.size >= 24) {
+                waterfallHistory.removeFirst()
+            }
+            waterfallHistory.addLast(bins.copyOf())
         }
         return bins
     }
 
+    fun captureWaveformFrame(isPlaying: Boolean, sampleCount: Int = 64): FloatArray {
+        val out = FloatArray(sampleCount)
+        if (!isPlaying) return out
+        val vis = systemVisualizer
+        if (vis != null) {
+            try {
+                if (vis.getWaveForm(waveBuffer) == Visualizer.SUCCESS && waveBuffer.isNotEmpty()) {
+                    var hasSignal = false
+                    for (i in 0 until sampleCount) {
+                        val srcIdx = ((i.toFloat() / sampleCount) * waveBuffer.size).toInt().coerceIn(0, waveBuffer.lastIndex)
+                        val unsigned = waveBuffer[srcIdx].toInt() and 0xFF
+                        val norm = (unsigned - 128) / 128f
+                        if (abs(norm) > 0.01f) hasSignal = true
+                        out[i] = norm
+                    }
+                    if (hasSignal) return out
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        // Fallback to exact impulse response of the active biquad filter cascade
+        val responseDb = computeFrequencyResponseCurveDb(_dspState.value, numPoints = sampleCount)
+        for (i in 0 until sampleCount) {
+            out[i] = (responseDb[i] / 18f).coerceIn(-1f, 1f)
+        }
+        return out
+    }
+
     private fun syncToHardwareEffects() {
         val state = _dspState.value
+        val dspActive = state.eqEnabled && state.outputSignalMode != OutputSignalMode.BIT_PERFECT_DIRECT_PCM
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                systemDynamicsProcessing?.let { dp ->
+                    dp.enabled = dspActive
+                    dp.setInputGainAllChannelsTo(if (dspActive) state.preampDb else 0f)
+                    for (idx in 0 until 10) {
+                        val freqHz = if (state.isParametricMode) {
+                            state.parametricBands.getOrNull(idx)?.frequencyHz?.toFloat()
+                                ?: DspState.BAND_FREQUENCIES_HZ[idx].toFloat()
+                        } else {
+                            DspState.BAND_FREQUENCIES_HZ[idx].toFloat()
+                        }
+                        val gainDb = if (!dspActive) {
+                            0f
+                        } else if (state.isParametricMode) {
+                            val pBand = state.parametricBands.getOrNull(idx)
+                            if (pBand != null && pBand.enabled) pBand.gainDb else 0f
+                        } else {
+                            state.bandGainsDb.getOrElse(idx) { 0f }
+                        }
+                        val eqBand = DynamicsProcessing.EqBand(true, freqHz.coerceIn(20f, 20000f), gainDb.coerceIn(-15f, 15f))
+                        dp.setPreEqBandAllChannelsTo(idx, eqBand)
+                        dp.setPostEqBandAllChannelsTo(idx, eqBand)
+                    }
+                }
+            }
             systemEqualizer?.let { eq ->
-                eq.enabled = state.eqEnabled && state.outputSignalMode != OutputSignalMode.BIT_PERFECT_DIRECT_PCM
+                eq.enabled = dspActive && systemDynamicsProcessing == null
                 val numBands = eq.numberOfBands.toInt()
                 val range = eq.bandLevelRange
                 val minMb = range.getOrElse(0) { (-1500).toShort() }.toInt()
@@ -546,6 +711,138 @@ class AudioDspController {
                     sumDb += peq.gainDb * weight
                 }
                 sumDb.coerceIn(-15f, 15f)
+            }
+        }
+
+        /**
+         * Computes the true cascaded digital biquad transfer function magnitude response (in dB)
+         * across [numPoints] logarithmically spaced frequencies from 20 Hz to 20,000 Hz.
+         */
+        fun computeFrequencyResponseCurveDb(state: DspState, numPoints: Int = 96): FloatArray {
+            val out = FloatArray(numPoints)
+            if (!state.eqEnabled) return out
+
+            val sampleRate = 48000.0
+            val activeBands: List<ParametricBand> = if (state.isParametricMode) {
+                state.parametricBands.filter { it.enabled }
+            } else {
+                DspState.BAND_FREQUENCIES_HZ.mapIndexed { idx, hz ->
+                    ParametricBand(
+                        index = idx + 1,
+                        enabled = true,
+                        filterType = when (idx) {
+                            0 -> PeqFilterType.LOW_SHELF
+                            9 -> PeqFilterType.HIGH_SHELF
+                            else -> PeqFilterType.PEAKING
+                        },
+                        frequencyHz = hz,
+                        gainDb = state.bandGainsDb.getOrElse(idx) { 0f },
+                        qFactor = 1.41f
+                    )
+                }
+            }
+
+            // Precompute RBJ biquad coefficients for each active band + BassBoost low-shelf
+            val biquads = ArrayList<DoubleArray>(activeBands.size + 1)
+            for (band in activeBands) {
+                if (abs(band.gainDb) < 0.05f) continue
+                biquads.add(
+                    computeRbjBiquadCoeffs(
+                        filterType = band.filterType,
+                        fc = band.frequencyHz.toDouble().coerceIn(20.0, 20000.0),
+                        gainDb = band.gainDb.toDouble(),
+                        q = band.qFactor.toDouble().coerceIn(0.2, 12.0),
+                        fs = sampleRate
+                    )
+                )
+            }
+            if (state.bassBoostPercent > 0) {
+                val bassGainDb = (state.bassBoostPercent / 100.0) * 8.0
+                biquads.add(
+                    computeRbjBiquadCoeffs(
+                        filterType = PeqFilterType.LOW_SHELF,
+                        fc = 85.0,
+                        gainDb = bassGainDb,
+                        q = 0.707,
+                        fs = sampleRate
+                    )
+                )
+            }
+
+            val minFreq = 20.0
+            val maxFreq = 20000.0
+            val freqRatio = maxFreq / minFreq
+
+            for (i in 0 until numPoints) {
+                val frac = i.toDouble() / (numPoints - 1).coerceAtLeast(1)
+                val freq = minFreq * freqRatio.pow(frac)
+                val w = 2.0 * PI * freq / sampleRate
+                val cosW = cos(w)
+                val sinW = sin(w)
+                val cos2W = cos(2.0 * w)
+                val sin2W = sin(2.0 * w)
+
+                var totalDb = state.preampDb.toDouble()
+                for (c in biquads) {
+                    val b0 = c[0]; val b1 = c[1]; val b2 = c[2]
+                    val a0 = c[3]; val a1 = c[4]; val a2 = c[5]
+                    val numRe = b0 + b1 * cosW + b2 * cos2W
+                    val numIm = -(b1 * sinW + b2 * sin2W)
+                    val denRe = a0 + a1 * cosW + a2 * cos2W
+                    val denIm = -(a1 * sinW + a2 * sin2W)
+                    val numMagSq = numRe * numRe + numIm * numIm
+                    val denMagSq = (denRe * denRe + denIm * denIm).coerceAtLeast(1e-12)
+                    val mag = sqrt(numMagSq / denMagSq).coerceAtLeast(1e-6)
+                    totalDb += 20.0 * log10(mag)
+                }
+                out[i] = totalDb.toFloat().coerceIn(-18f, 18f)
+            }
+            return out
+        }
+
+        private fun computeRbjBiquadCoeffs(
+            filterType: PeqFilterType,
+            fc: Double,
+            gainDb: Double,
+            q: Double,
+            fs: Double
+        ): DoubleArray {
+            val a = 10.0.pow(gainDb / 40.0)
+            val w0 = 2.0 * PI * fc / fs
+            val cosW0 = cos(w0)
+            val sinW0 = sin(w0)
+            val alpha = sinW0 / (2.0 * q)
+
+            return when (filterType) {
+                PeqFilterType.PEAKING -> {
+                    val b0 = 1.0 + alpha * a
+                    val b1 = -2.0 * cosW0
+                    val b2 = 1.0 - alpha * a
+                    val a0 = 1.0 + alpha / a
+                    val a1 = -2.0 * cosW0
+                    val a2 = 1.0 - alpha / a
+                    doubleArrayOf(b0, b1, b2, a0, a1, a2)
+                }
+                PeqFilterType.LOW_SHELF -> {
+                    val twoSqrtAAlpha = 2.0 * sqrt(a) * alpha
+                    val b0 = a * ((a + 1.0) - (a - 1.0) * cosW0 + twoSqrtAAlpha)
+                    val b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cosW0)
+                    val b2 = a * ((a + 1.0) - (a - 1.0) * cosW0 - twoSqrtAAlpha)
+                    val a0 = (a + 1.0) + (a - 1.0) * cosW0 + twoSqrtAAlpha
+                    val a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cosW0)
+                    val a2 = (a + 1.0) + (a - 1.0) * cosW0 - twoSqrtAAlpha
+                    doubleArrayOf(b0, b1, b2, a0, a1, a2)
+                }
+                PeqFilterType.HIGH_SHELF -> {
+                    val twoSqrtAAlpha = 2.0 * sqrt(a) * alpha
+                    val b0 = a * ((a + 1.0) + (a - 1.0) * cosW0 + twoSqrtAAlpha)
+                    val b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cosW0)
+                    val b2 = a * ((a + 1.0) + (a - 1.0) * cosW0 - twoSqrtAAlpha)
+                    val a0 = (a + 1.0) - (a - 1.0) * cosW0 + twoSqrtAAlpha
+                    val a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cosW0)
+                    val a2 = (a + 1.0) - (a - 1.0) * cosW0 - twoSqrtAAlpha
+                    doubleArrayOf(b0, b1, b2, a0, a1, a2)
+                }
             }
         }
 

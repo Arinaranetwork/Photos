@@ -8,8 +8,10 @@ Finalize all 65 features across the application, execute full unit test and `ver
 - Real device media indexing via Android `MediaStore` with automatic permissions on launch and `ON_RESUME` refresh, zero fabricated sample files, and real `ExoPlayer` + `PlayerView` video/audio playback.
 - Borderless UI cards, chips, buttons, bottom sheets, and floating bars across the app, concise consumer-friendly copy, and removal of the Cut bottom tab and all `"Studio"` strings.
 - Comprehensive unit test suite verifying all engines (`PhotosDesignTokensTest`, `PhotosPowerUserSuiteTest`).
-- Version bump to `1.0.1` (`versionCode = 11`, `versionName = "1.0.1"`) in `app/build.gradle.kts`.
-- Creation of `/Changelog/Changelog_1.0.md`, `/Assets/Banners/PhotosBanner_1.0_2026-10-25.png`, and `/Output/Release/Photos_1.0.1_Android.apk`.
+- Version bump to `1.0.2` (`versionCode = 12`, `versionName = "1.0.2"`) in `app/build.gradle.kts`.
+- Creation of `/Changelog/Changelog_1.0.md`, `/Assets/Banners/PhotosBanner_1.0_2026-10-25.png`, and `/Output/Release/Photos_1.0.2_Android.apk` (`/Output/Release/Photos_1.0.2_Beta_Android.apk`).
+- Real-Time EQ DSP & Visual Rendering: API 28+ `DynamicsProcessing` 10-band hardware EQ + `Preamp` inputGain + 5-band `Equalizer` fallback, real-time 96-point cascaded RBJ Biquad frequency response curve (`20Hz`–`20kHz`) with overlaid live 30–60fps FFT spectrum, 2D time-frequency Waterfall Spectrogram ring buffer, and multi-band touch curve sculpting.
+- Full-Screen Immersive Image Viewer (`PhotoCompareAndLoupeSheet`): Edge-to-edge `fillMaxSize()` viewport replacing the cramped `320.dp` bottom-sheet box, 1-tap Fullscreen immersion toggle (hiding all top/bottom HUD chrome), double-tap (`1.0x` <-> `2.5x`) and pinch (`1.0x..8.0x`) zoom, Previous/Next photo navigation, horizontally scrollable chip bar (preventing `"Focus"` text wrapping), and `AppSlider` thumb inset fix.
 
 ## Out Of Scope
 - Desktop client build.
@@ -35,7 +37,7 @@ Seamless transitions between all screens and sheets using borderless `AppScreen`
 ```
 
 ## Logic Notes
-- Every entry in `Docs/Version/1.0/1.0/1.0.0/Anchor.md` and `Docs/Version/1.0/1.0/1.0.1/Anchor.md` is individually verified with test and build evidence.
+- Every entry in `Docs/Version/1.0/1.0/1.0.0/Anchor.md`, `Docs/Version/1.0/1.0/1.0.1/Anchor.md`, and `Docs/Version/1.0/1.0/1.0.2/Anchor.md` is individually verified with test and build evidence.
 
 ## Risks
 - None.
@@ -45,4 +47,4 @@ Seamless transitions between all screens and sheets using borderless `AppScreen`
 
 ## Acceptance Criteria
 - `.\gradlew.bat verifyAndroidRules testDebugUnitTest assembleDebug assembleRelease` succeeds with 0 errors and 0 warnings.
-- `Photos_1.0.1_Android.apk` is packaged in `/Output/Release/`.
+- `Photos_1.0.2_Android.apk` and `Photos_1.0.2_Beta_Android.apk` are packaged in `/Output/Release/`.

@@ -84,6 +84,9 @@ import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.arinara.photos.data.model.CueTrackSlice
+import com.arinara.photos.data.model.LrcLyricLine
 import com.arinara.photos.data.model.MediaFilter
 import com.arinara.photos.data.model.MediaItem
 import com.arinara.photos.data.model.MediaType
@@ -92,7 +95,10 @@ import com.arinara.photos.data.repository.MediaRepository
 import com.arinara.photos.media.AudioDspController
 import com.arinara.photos.media.LoopTickDirective
 import com.arinara.photos.media.MultiQueueManager
+import com.arinara.photos.media.SubtitleCue
 import com.arinara.photos.media.VideoTheaterEngine
+import com.arinara.photos.media.inspector.DeepMediaInspectionReport
+import com.arinara.photos.media.inspector.DuplicateGroup
 import com.arinara.photos.media.inspector.MediaInspectorAndVaultEngine
 import com.arinara.photos.media.trimmer.MediaTrimmerEngine
 import com.arinara.photos.theme.ElmsSans
@@ -118,8 +124,10 @@ import com.arinara.photos.ui.player.AudiophilePlayerSheet
 import com.arinara.photos.ui.theme.ElectricSlateTokens
 import com.arinara.photos.ui.theme.jigglePressClickable
 import com.arinara.photos.ui.video.VideoTheaterSheet
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 enum class PhotosNavTab {
@@ -192,7 +200,8 @@ fun HomeScreen(
     var audioPositionMs by remember { mutableLongStateOf(0L) }
     var audioDurationMs by remember { mutableLongStateOf(0L) }
     var sleepTimerRemainingMin by remember { mutableIntStateOf(0) }
-    var spectrumBins by remember { mutableStateOf(FloatArray(32) { 0.08f }) }
+    var spectrumBins by remember { mutableStateOf(FloatArray(32)) }
+    var waveformSamples by remember { mutableStateOf(FloatArray(64)) }
 
     var isVideoPlaying by remember { mutableStateOf(false) }
     var videoPositionMs by remember { mutableLongStateOf(0L) }
@@ -313,58 +322,88 @@ fun HomeScreen(
         }
     }
 
-    // Real-time ticker for Audio Position, Loop Evaluation & Spectrum
-    LaunchedEffect(isAudioPlaying, currentAudioTrack?.id) {
-        while (true) {
-            delay(80L)
+    // Immediate real-time EQ spectrum/waveform refresh whenever dspState changes while EQ Studio is open
+    LaunchedEffect(dspState, showEqStudioSheet, isAudioPlaying) {
+        if (showEqStudioSheet) {
             if (isAudioPlaying && currentAudioTrack != null) {
-                val realDur = try {
-                    exoPlayer?.duration?.takeIf { it > 0L }
-                } catch (_: Throwable) {
-                    null
-                } ?: currentAudioTrack.durationMs.coerceAtLeast(1000L)
-                audioDurationMs = realDur
-
-                val realPos = try {
-                    exoPlayer?.currentPosition?.coerceAtLeast(0L)
-                } catch (_: Throwable) {
-                    null
-                } ?: audioPositionMs
-                audioPositionMs = realPos.coerceAtMost(realDur)
-
-                when (val directive = multiQueueManager.evaluatePositionTick(audioPositionMs, realDur)) {
-                    is LoopTickDirective.SeekToMs -> {
-                        audioPositionMs = directive.targetMs
-                        try {
-                            exoPlayer?.seekTo(directive.targetMs)
-                        } catch (_: Throwable) {
-                        }
-                    }
-                    is LoopTickDirective.AdvanceToTrack -> {
-                        multiQueueManager.selectTrackAt(directive.nextIndex, resetAbLoop = false)
-                        audioPositionMs = 0L
-                        try {
-                            exoPlayer?.seekTo(0L)
-                        } catch (_: Throwable) {
-                        }
-                    }
-                    is LoopTickDirective.StopEndOfQueue -> {
-                        isAudioPlaying = false
-                        audioPositionMs = 0L
-                    }
-                    is LoopTickDirective.ContinuePlayback -> Unit
-                }
-
                 spectrumBins = audioDspController.generateSpectrumFrame(
                     playbackPositionMs = audioPositionMs,
                     isPlaying = true,
                     isLossless = currentAudioTrack.isLossless
                 )
+                waveformSamples = audioDspController.captureWaveformFrame(isPlaying = true)
             } else {
+                spectrumBins = FloatArray(32)
+                waveformSamples = FloatArray(64)
+            }
+        }
+    }
+
+    // Efficient Audio Position, Loop Evaluation & Real Hardware Visualizer Ticker
+    // Runs ONLY while audio is actively playing to eliminate idle UI recomposition lag
+    LaunchedEffect(isAudioPlaying, currentAudioTrack?.id, showEqStudioSheet, showAudiophilePlayerSheet) {
+        if (!isAudioPlaying || currentAudioTrack == null) {
+            if (showEqStudioSheet) {
+                spectrumBins = FloatArray(32)
+                waveformSamples = FloatArray(64)
+            }
+            return@LaunchedEffect
+        }
+        while (isAudioPlaying) {
+            val tickMs = when {
+                showEqStudioSheet -> 33L
+                showAudiophilePlayerSheet -> 120L
+                else -> 500L
+            }
+            delay(tickMs)
+            val realDur = try {
+                exoPlayer?.duration?.takeIf { it > 0L }
+            } catch (_: Throwable) {
+                null
+            } ?: currentAudioTrack.durationMs.coerceAtLeast(1000L)
+            if (audioDurationMs != realDur) {
+                audioDurationMs = realDur
+            }
+
+            val realPos = try {
+                exoPlayer?.currentPosition?.coerceAtLeast(0L)
+            } catch (_: Throwable) {
+                null
+            } ?: audioPositionMs
+            audioPositionMs = realPos.coerceAtMost(realDur)
+
+            when (val directive = multiQueueManager.evaluatePositionTick(audioPositionMs, realDur)) {
+                is LoopTickDirective.SeekToMs -> {
+                    audioPositionMs = directive.targetMs
+                    try {
+                        exoPlayer?.seekTo(directive.targetMs)
+                    } catch (_: Throwable) {
+                    }
+                }
+                is LoopTickDirective.AdvanceToTrack -> {
+                    multiQueueManager.selectTrackAt(directive.nextIndex, resetAbLoop = false)
+                    audioPositionMs = 0L
+                    try {
+                        exoPlayer?.seekTo(0L)
+                    } catch (_: Throwable) {
+                    }
+                }
+                is LoopTickDirective.StopEndOfQueue -> {
+                    isAudioPlaying = false
+                    audioPositionMs = 0L
+                }
+                is LoopTickDirective.ContinuePlayback -> Unit
+            }
+
+            if (showEqStudioSheet) {
                 spectrumBins = audioDspController.generateSpectrumFrame(
                     playbackPositionMs = audioPositionMs,
-                    isPlaying = false,
-                    isLossless = currentAudioTrack?.isLossless ?: true
+                    isPlaying = true,
+                    isLossless = currentAudioTrack.isLossless
+                )
+                waveformSamples = audioDspController.captureWaveformFrame(
+                    isPlaying = true,
+                    sampleCount = 64
                 )
             }
         }
@@ -384,6 +423,10 @@ fun HomeScreen(
         }
     }
 
+    val chunkedGridRows = remember(filteredItems, gridColumns) {
+        filteredItems.chunked(gridColumns.coerceIn(1, 3))
+    }
+
     val continueWatchingVideos = remember(allMediaItems) {
         videoTheaterEngine.getContinueWatchingItems(allMediaItems)
     }
@@ -400,167 +443,172 @@ fun HomeScreen(
         allMediaItems.filter { it.isTrashed }
     }
 
-    val duplicateGroups = remember(allMediaItems) {
-        inspectorAndVaultEngine.findDuplicatesAndBurstGroups(allMediaItems)
-    }
-
     val allAudioTracks = remember(allMediaItems) {
         allMediaItems.filter { it.mediaType == MediaType.AUDIO && !it.isTrashed }
     }
 
-    AppScreen(
-        modifier = modifier,
-        topBar = {
-            AppTopBar(
-                title = when (selectedNavTab) {
-                    PhotosNavTab.HOME -> selectedAlbumName ?: "Photos"
-                    PhotosNavTab.ALBUMS -> "Albums"
-                    PhotosNavTab.EQ_DECK -> "Music"
-                },
-                actions = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (searchBarVisible) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.SurfaceElevated
-                                )
-                                .jigglePressClickable { searchBarVisible = !searchBarVisible },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Search,
-                                contentDescription = "Search",
-                                tint = ElectricSlateTokens.TextPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+    val isAnySheetOpen = showPhotoCompareSheet ||
+        showAudiophilePlayerSheet ||
+        showEqStudioSheet ||
+        showVideoTheaterSheet ||
+        showInspectorVaultSheet
 
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ElectricSlateTokens.SurfaceElevated)
-                                .jigglePressClickable {
-                                    gridColumns = when (gridColumns) {
-                                        2 -> 3
-                                        3 -> 1
-                                        else -> 2
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
+    Box(modifier = modifier.fillMaxSize()) {
+        AppScreen(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                AppTopBar(
+                    title = when (selectedNavTab) {
+                        PhotosNavTab.HOME -> selectedAlbumName ?: "Photos"
+                        PhotosNavTab.ALBUMS -> "Albums"
+                        PhotosNavTab.EQ_DECK -> "Music"
+                    },
+                    actions = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.GridView,
-                                contentDescription = "Grid",
-                                tint = ElectricSlateTokens.TextPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Box {
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(ElectricSlateTokens.SurfaceElevated)
-                                    .jigglePressClickable { sortMenuExpanded = true },
+                                    .background(
+                                        if (searchBarVisible) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.SurfaceElevated
+                                    )
+                                    .jigglePressClickable { searchBarVisible = !searchBarVisible },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.Sort,
-                                    contentDescription = "Sort",
+                                    imageVector = Icons.Outlined.Search,
+                                    contentDescription = "Search",
                                     tint = ElectricSlateTokens.TextPrimary,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
 
-                            AppDropdownMenu(
-                                expanded = sortMenuExpanded,
-                                onDismissRequest = { sortMenuExpanded = false }
-                            ) {
-                                SortOrder.entries.forEach { order ->
-                                    AppDropdownMenuItem(
-                                        text = order.label,
-                                        trailingText = if (selectedSortOrder == order) "✓" else null,
-                                        onClick = {
-                                            selectedSortOrder = order
-                                            sortMenuExpanded = false
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(ElectricSlateTokens.SurfaceElevated)
+                                    .jigglePressClickable {
+                                        gridColumns = when (gridColumns) {
+                                            2 -> 3
+                                            3 -> 1
+                                            else -> 2
                                         }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.GridView,
+                                    contentDescription = "Grid",
+                                    tint = ElectricSlateTokens.TextPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Box {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(ElectricSlateTokens.SurfaceElevated)
+                                        .jigglePressClickable { sortMenuExpanded = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.Sort,
+                                        contentDescription = "Sort",
+                                        tint = ElectricSlateTokens.TextPrimary,
+                                        modifier = Modifier.size(18.dp)
                                     )
+                                }
+
+                                AppDropdownMenu(
+                                    expanded = sortMenuExpanded,
+                                    onDismissRequest = { sortMenuExpanded = false }
+                                ) {
+                                    SortOrder.entries.forEach { order ->
+                                        AppDropdownMenuItem(
+                                            text = order.label,
+                                            trailingText = if (selectedSortOrder == order) "✓" else null,
+                                            onClick = {
+                                                selectedSortOrder = order
+                                                sortMenuExpanded = false
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            )
-        },
-        bottomBar = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (currentAudioTrack != null) {
-                    PersistentMiniPlayerPill(
-                        track = currentAudioTrack,
-                        isPlaying = isAudioPlaying,
-                        positionMs = audioPositionMs,
-                        loopShortBadge = loopMode.shortBadge,
-                        onExpandPlayer = { showAudiophilePlayerSheet = true },
-                        onPlayPause = { isAudioPlaying = !isAudioPlaying },
-                        onNext = {
-                            val nextIdx = (activeQueueState.activeIndex + 1) % activeQueueState.tracks.size.coerceAtLeast(1)
-                            multiQueueManager.selectTrackAt(nextIdx, resetAbLoop = false)
-                            audioPositionMs = 0L
-                        },
-                        onCycleLoop = { multiQueueManager.cycleLoopMode() },
-                        onOpenEq = {
-                            isEqSheetMinimized = false
-                            showEqStudioSheet = true
+                )
+            },
+            bottomBar = {
+                if (!isAnySheetOpen) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (currentAudioTrack != null) {
+                            PersistentMiniPlayerPill(
+                                track = currentAudioTrack,
+                                isPlaying = isAudioPlaying,
+                                positionMs = audioPositionMs,
+                                loopShortBadge = loopMode.shortBadge,
+                                onExpandPlayer = { showAudiophilePlayerSheet = true },
+                                onPlayPause = { isAudioPlaying = !isAudioPlaying },
+                                onNext = {
+                                    val nextIdx = (activeQueueState.activeIndex + 1) % activeQueueState.tracks.size.coerceAtLeast(1)
+                                    multiQueueManager.selectTrackAt(nextIdx, resetAbLoop = false)
+                                    audioPositionMs = 0L
+                                },
+                                onCycleLoop = { multiQueueManager.cycleLoopMode() },
+                                onOpenEq = {
+                                    isEqSheetMinimized = false
+                                    showEqStudioSheet = true
+                                }
+                            )
                         }
-                    )
-                }
 
-                AppFloatingBar {
-                    AppFloatingBarItem(
-                        icon = Icons.Outlined.Home,
-                        contentDescription = "Photos",
-                        isSelected = selectedNavTab == PhotosNavTab.HOME,
-                        onClick = {
-                            selectedNavTab = PhotosNavTab.HOME
-                            selectedAlbumName = null
+                        AppFloatingBar {
+                            AppFloatingBarItem(
+                                icon = Icons.Outlined.Home,
+                                contentDescription = "Photos",
+                                isSelected = selectedNavTab == PhotosNavTab.HOME,
+                                onClick = {
+                                    selectedNavTab = PhotosNavTab.HOME
+                                    selectedAlbumName = null
+                                }
+                            )
+                            AppFloatingBarItem(
+                                icon = Icons.Outlined.Collections,
+                                contentDescription = "Albums",
+                                isSelected = selectedNavTab == PhotosNavTab.ALBUMS,
+                                onClick = { selectedNavTab = PhotosNavTab.ALBUMS }
+                            )
+                            AppFloatingBarItem(
+                                icon = Icons.Outlined.Equalizer,
+                                contentDescription = "Music",
+                                isSelected = selectedNavTab == PhotosNavTab.EQ_DECK,
+                                onClick = { selectedNavTab = PhotosNavTab.EQ_DECK }
+                            )
                         }
-                    )
-                    AppFloatingBarItem(
-                        icon = Icons.Outlined.Collections,
-                        contentDescription = "Albums",
-                        isSelected = selectedNavTab == PhotosNavTab.ALBUMS,
-                        onClick = { selectedNavTab = PhotosNavTab.ALBUMS }
-                    )
-                    AppFloatingBarItem(
-                        icon = Icons.Outlined.Equalizer,
-                        contentDescription = "Music",
-                        isSelected = selectedNavTab == PhotosNavTab.EQ_DECK,
-                        onClick = { selectedNavTab = PhotosNavTab.EQ_DECK }
-                    )
+                    }
                 }
             }
-        }
-    ) { contentPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(
-                top = contentPadding.calculateTopPadding() + 8.dp,
-                bottom = contentPadding.calculateBottomPadding() + 40.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        ) { contentPadding ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(
+                    top = contentPadding.calculateTopPadding() + 8.dp,
+                    bottom = contentPadding.calculateBottomPadding() + 88.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             if (statusNoticeText != null) {
                 item {
                     AppNoticeBanner(
@@ -709,8 +757,11 @@ fun HomeScreen(
                             }
                         }
                     } else {
-                        val chunkedRows = filteredItems.chunked(gridColumns.coerceIn(1, 3))
-                        items(chunkedRows) { rowItems ->
+                        items(
+                            items = chunkedGridRows,
+                            key = { row -> row.first().id },
+                            contentType = { "media_grid_row" }
+                        ) { rowItems ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1053,306 +1104,340 @@ fun HomeScreen(
         }
     }
 
-    // 1. Photo Viewer & Compare Sheet
-    PhotoCompareAndLoupeSheet(
-        visible = showPhotoCompareSheet,
-        primaryItem = selectedPhotoItem,
-        comparisonCandidates = allMediaItems,
-        onDismiss = { showPhotoCompareSheet = false },
-        onOpenInspector = { item ->
-            showPhotoCompareSheet = false
-            inspectorTargetItem = item
-            inspectorInitialTab = InspectorTab.HISTOGRAM_EXIF
-            showInspectorVaultSheet = true
-        },
-        onRecordVoiceNote = {},
-        onPlayVoiceNote = {}
-    )
-
-    // 2. Music Player Sheet (Only real .lrc & .cue files next to the audio file)
-    val currentLyrics = remember(currentAudioTrack?.filePath) {
-        val path = currentAudioTrack?.filePath ?: ""
-        val lrcFile = if (path.isNotBlank()) File(path.substringBeforeLast('.') + ".lrc") else null
-        if (lrcFile != null && lrcFile.exists()) {
-            MultiQueueManager.parseLrcLyrics(lrcFile.readText())
-        } else {
-            emptyList()
-        }
-    }
-
-    val currentCueSlices = remember(currentAudioTrack?.filePath, audioDurationMs) {
-        val path = currentAudioTrack?.filePath ?: ""
-        val cueFile = if (path.isNotBlank()) File(path.substringBeforeLast('.') + ".cue") else null
-        if (cueFile != null && cueFile.exists()) {
-            MultiQueueManager.parseCueSheet(
-                cueFile.readText(),
-                path,
-                audioDurationMs.coerceAtLeast(1000L)
+        // 1. Full-Screen Immersive Photo Viewer & Compare Sheet (Lazy-mounted only when visible)
+        if (showPhotoCompareSheet) {
+            PhotoCompareAndLoupeSheet(
+                visible = true,
+                primaryItem = selectedPhotoItem,
+                comparisonCandidates = allMediaItems,
+                onDismiss = { showPhotoCompareSheet = false },
+                onOpenInspector = { item ->
+                    showPhotoCompareSheet = false
+                    inspectorTargetItem = item
+                    inspectorInitialTab = InspectorTab.HISTOGRAM_EXIF
+                    showInspectorVaultSheet = true
+                },
+                onRecordVoiceNote = {},
+                onPlayVoiceNote = {},
+                onSelectPhoto = { selectedPhotoItem = it }
             )
-        } else emptyList()
-    }
+        }
 
-    val currentSignalReport = remember(currentAudioTrack, dspState) {
-        audioDspController.buildSignalPathReport(
-            codecName = currentAudioTrack?.codecName ?: "PCM",
-            bitDepth = currentAudioTrack?.bitDepth ?: 16,
-            sampleRateHz = currentAudioTrack?.sampleRateHz ?: 44100,
-            bitrateKbps = currentAudioTrack?.bitrateKbps ?: 320,
-            isLosslessSource = currentAudioTrack?.isLossless ?: false
-        )
-    }
+        // 2. Music Player Sheet (Lazy-mounted & loads .lrc/.cue off the UI thread)
+        if (showAudiophilePlayerSheet) {
+            var currentLyrics by remember { mutableStateOf<List<LrcLyricLine>>(emptyList()) }
+            var currentCueSlices by remember { mutableStateOf<List<CueTrackSlice>>(emptyList()) }
 
-    AudiophilePlayerSheet(
-        visible = showAudiophilePlayerSheet,
-        currentTrack = currentAudioTrack,
-        isPlaying = isAudioPlaying,
-        playbackPositionMs = audioPositionMs,
-        trackDurationMs = audioDurationMs.coerceAtLeast(currentAudioTrack?.durationMs ?: 1000L),
-        loopMode = loopMode,
-        abLoopState = abLoopState,
-        activeQueueState = activeQueueState,
-        allQueueSlots = multiQueueManager.getAllSlotStates(),
-        dspState = dspState,
-        signalPathReport = currentSignalReport,
-        lyrics = currentLyrics,
-        cueSlices = currentCueSlices,
-        bookmarks = currentAudioTrack?.let { multiQueueManager.getBookmarksForMedia(it.id) }.orEmpty() + bookmarks.filter { it.mediaId == currentAudioTrack?.id }.distinctBy { it.id },
-        sleepTimerRemainingMin = sleepTimerRemainingMin,
-        onDismiss = { showAudiophilePlayerSheet = false },
-        onPlayPauseToggle = { isAudioPlaying = !isAudioPlaying },
-        onSeekToMs = { pos ->
-            audioPositionMs = pos
-            try {
-                exoPlayer?.seekTo(pos)
-            } catch (_: Throwable) {
-            }
-        },
-        onSkipPrevious = {
-            if (audioPositionMs > 3_000L) {
-                audioPositionMs = 0L
-                try {
-                    exoPlayer?.seekTo(0L)
-                } catch (_: Throwable) {
+            LaunchedEffect(currentAudioTrack?.filePath, audioDurationMs) {
+                val path = currentAudioTrack?.filePath ?: ""
+                if (path.isBlank()) {
+                    currentLyrics = emptyList()
+                    currentCueSlices = emptyList()
+                    return@LaunchedEffect
                 }
-            } else {
-                val prevIdx = (activeQueueState.activeIndex - 1).coerceAtLeast(0)
-                multiQueueManager.selectTrackAt(prevIdx, resetAbLoop = false)
-                audioPositionMs = 0L
+                withContext(Dispatchers.IO) {
+                    val base = path.substringBeforeLast('.')
+                    val lrcFile = File("$base.lrc")
+                    val parsedLrc = if (lrcFile.exists()) {
+                        MultiQueueManager.parseLrcLyrics(lrcFile.readText())
+                    } else emptyList()
+
+                    val cueFile = File("$base.cue")
+                    val parsedCue = if (cueFile.exists()) {
+                        MultiQueueManager.parseCueSheet(
+                            cueFile.readText(),
+                            path,
+                            audioDurationMs.coerceAtLeast(1000L)
+                        )
+                    } else emptyList()
+
+                    currentLyrics = parsedLrc
+                    currentCueSlices = parsedCue
+                }
             }
-        },
-        onSkipNext = {
-            val nextIdx = (activeQueueState.activeIndex + 1) % activeQueueState.tracks.size.coerceAtLeast(1)
-            multiQueueManager.selectTrackAt(nextIdx, resetAbLoop = false)
-            audioPositionMs = 0L
-        },
-        onCycleLoopMode = { multiQueueManager.cycleLoopMode() },
-        onMarkAbStart = { multiQueueManager.markAbPointA(it) },
-        onMarkAbEnd = { multiQueueManager.markAbPointB(it) },
-        onNudgeAbBounds = { dStart, dEnd ->
-            multiQueueManager.nudgeAbBounds(dStart, dEnd, audioDurationMs.coerceAtLeast(1000L))
-        },
-        onSetAbMaxLoops = { multiQueueManager.setAbMaxIterations(it) },
-        onClearAbLoop = { multiQueueManager.clearAbLoop() },
-        onToggleShuffle = { multiQueueManager.toggleShuffle() },
-        onSwitchQueueSlot = { slot ->
-            val switched = multiQueueManager.switchQueueSlot(slot, audioPositionMs)
-            audioPositionMs = switched.savedPositionMs
-        },
-        onSelectQueueTrack = { idx ->
-            multiQueueManager.selectTrackAt(idx)
-            audioPositionMs = 0L
-            isAudioPlaying = true
-        },
-        onMoveQueueTrack = { from, to -> multiQueueManager.moveQueueItem(from, to) },
-        onRemoveQueueTrack = { idx -> multiQueueManager.removeFromQueue(idx) },
-        onSaveQueueM3u8 = {
-            val outDir = File(context.filesDir, "playlists")
-            val m3u = multiQueueManager.saveActiveQueueAsM3u8(outDir, activeQueueState.slot.displayName)
-            statusNoticeText = "Saved playlist: ${m3u.name}"
-        },
-        onSelectOutputSignalMode = { audioDspController.setOutputSignalMode(it) },
-        onChangeSpeedAndPitch = { spd, pitch, c432 ->
-            audioDspController.setPlaybackSpeedAndPitch(spd, pitch, c432)
-        },
-        onToggleSkipSilence = { audioDspController.setSkipSilence(it) },
-        onChangeCrossfadeSec = { audioDspController.setCrossfadeDurationSec(it) },
-        onChangeCrossfeedPercent = { audioDspController.setCrossfeedPercent(it) },
-        onChangeChannelBalance = { audioDspController.setChannelBalance(it) },
-        onChangeReplayGainMode = { audioDspController.setReplayGainMode(it) },
-        onSetSleepTimerMin = { sleepTimerRemainingMin = it },
-        onAddBookmark = { label ->
-            currentAudioTrack?.let { multiQueueManager.addBookmark(it.id, audioPositionMs, label) }
-        },
-        onRemoveBookmark = { multiQueueManager.removeBookmark(it) },
-        onSaveTagEdits = { title, artist, album ->
-            currentAudioTrack?.let {
-                mediaRepository.updateMediaTags(it.id, title, artist, album)
-                statusNoticeText = "Saved tags for '$title'"
+
+            val currentSignalReport = remember(currentAudioTrack, dspState) {
+                audioDspController.buildSignalPathReport(
+                    codecName = currentAudioTrack?.codecName ?: "PCM",
+                    bitDepth = currentAudioTrack?.bitDepth ?: 16,
+                    sampleRateHz = currentAudioTrack?.sampleRateHz ?: 44100,
+                    bitrateKbps = currentAudioTrack?.bitrateKbps ?: 320,
+                    isLosslessSource = currentAudioTrack?.isLossless ?: false
+                )
             }
-        },
-        onOpenEqStudio = {
-            showAudiophilePlayerSheet = false
-            isEqSheetMinimized = false
-            showEqStudioSheet = true
-        },
-        onOpenTrimmerForCurrent = {}
-    )
 
-    // 3. Equalizer Sheet
-    AudioEqStudioSheet(
-        visible = showEqStudioSheet,
-        isMinimized = isEqSheetMinimized,
-        onMinimizedChange = { isEqSheetMinimized = it },
-        dspState = dspState,
-        presets = audioDspController.allPresets(),
-        spectrumBins = spectrumBins,
-        isLosslessTrack = currentAudioTrack?.isLossless ?: true,
-        onDismiss = { showEqStudioSheet = false },
-        onToggleEqEnabled = { audioDspController.setEqEnabled(it) },
-        onToggleParametricMode = { audioDspController.setParametricMode(it) },
-        onChangePreampDb = { audioDspController.setPreampDb(it) },
-        onChangeBandGain = { idx, gain -> audioDspController.setBandGain(idx, gain) },
-        onUpdateParametricBand = { idx, fc, gain, q ->
-            audioDspController.updateParametricBand(idx, fc, gain, q)
-        },
-        onApplyPreset = { audioDspController.applyPreset(it) },
-        onSaveCustomPreset = { name ->
-            audioDspController.saveCustomPreset(name)
-            statusNoticeText = "Saved preset: $name"
-        },
-        onImportAutoEqProfile = { name, txt ->
-            val preset = audioDspController.importAutoEqProfile(name, txt)
-            statusNoticeText = "Applied ${preset.name}"
-        },
-        onChangeBassBoost = { audioDspController.setBassBoostPercent(it) },
-        onChangeVirtualizer = { audioDspController.setVirtualizerPercent(it) },
-        onChangeLoudnessDb = { audioDspController.setLoudnessGainDb(it) },
-        onSwitchOutputDevice = { audioDspController.switchOutputDevice(it) },
-        onChangeVisualizerMode = { audioDspController.setVisualizerMode(it) }
-    )
-
-    // 4. Real Video Player Sheet (Only real .srt files next to the video file)
-    val currentVideoSubtitles = remember(activeVideoItem?.filePath) {
-        val path = activeVideoItem?.filePath ?: ""
-        val base = path.substringBeforeLast('.')
-        val srtFile = if (base.isNotBlank()) File("$base.srt") else null
-        val enFile = if (base.isNotBlank()) File("$base.en.srt") else null
-        val secondFile = if (base.isNotBlank()) File("$base.jp.srt") else null
-        val primaryCues = when {
-            srtFile != null && srtFile.exists() -> VideoTheaterEngine.parseSrtSubtitles(srtFile.readText())
-            enFile != null && enFile.exists() -> VideoTheaterEngine.parseSrtSubtitles(enFile.readText())
-            else -> emptyList()
-        }
-        val secondaryCues = if (secondFile != null && secondFile.exists()) {
-            VideoTheaterEngine.parseSrtSubtitles(secondFile.readText())
-        } else {
-            emptyList()
-        }
-        VideoTheaterEngine.mergeDualSubtitles(primaryCues, secondaryCues)
-    }
-
-    VideoTheaterSheet(
-        visible = showVideoTheaterSheet,
-        videoItem = activeVideoItem,
-        seriesEpisodes = activeVideoItem?.let { videoTheaterEngine.getSeriesEpisodes(allMediaItems, it) }.orEmpty(),
-        nextEpisode = activeVideoItem?.let { videoTheaterEngine.findNextEpisode(allMediaItems, it) },
-        chapters = videoTheaterEngine.defaultChaptersForVideo(activeVideoItem?.durationMs ?: 18_000L),
-        subtitleCues = currentVideoSubtitles,
-        sceneBookmarks = activeVideoItem?.let { videoTheaterEngine.getSceneBookmarks(it.id) }.orEmpty(),
-        folderSkipRule = activeVideoItem?.let { videoTheaterEngine.getFolderSkipRule(it) } ?: com.arinara.photos.media.FolderSkipRule("Default"),
-        isPlaying = isVideoPlaying,
-        playbackPositionMs = videoPositionMs,
-        videoDurationMs = activeVideoItem?.durationMs ?: 18_000L,
-        playbackSpeed = videoPlaybackSpeed,
-        onDismiss = {
-            activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, videoPositionMs) }
-            isVideoPlaying = false
-            showVideoTheaterSheet = false
-        },
-        onPlayPauseToggle = { isVideoPlaying = !isVideoPlaying },
-        onSeekToMs = { pos ->
-            videoPositionMs = pos
-            activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, pos) }
-        },
-        onSetPlaybackSpeed = { videoPlaybackSpeed = it },
-        onSelectEpisode = { ep ->
-            activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, videoPositionMs) }
-            activeVideoItem = ep
-            videoPositionMs = ep.resumePositionMs
-            isVideoPlaying = true
-        },
-        onSaveFolderSkipRule = { rule ->
-            videoTheaterEngine.setFolderSkipRule(rule)
-        },
-        onAddSceneBookmark = { caption ->
-            activeVideoItem?.let { videoTheaterEngine.addSceneBookmark(it.id, videoPositionMs, caption) }
-        },
-        onCaptureFramePng = { vid, tsMs ->
-            val outDir = File(context.filesDir, "captures")
-            val frameItem = mediaTrimmerEngine.captureVideoFrameStill(outDir, vid, tsMs, losslessPng = true)
-            mediaRepository.addOrUpdateMediaItem(frameItem)
-            statusNoticeText = "Saved frame: ${frameItem.title}"
-        },
-        onGenerateStoryboard = {},
-        onHandOffToBackgroundAudio = { vid, posMs ->
-            isVideoPlaying = false
-            showVideoTheaterSheet = false
-            val audioEquivalent = vid.copy(
-                mediaType = MediaType.AUDIO,
-                qualityBadge = vid.extension
+            AudiophilePlayerSheet(
+                visible = true,
+                currentTrack = currentAudioTrack,
+                isPlaying = isAudioPlaying,
+                playbackPositionMs = audioPositionMs,
+                trackDurationMs = audioDurationMs.coerceAtLeast(currentAudioTrack?.durationMs ?: 1000L),
+                loopMode = loopMode,
+                abLoopState = abLoopState,
+                activeQueueState = activeQueueState,
+                allQueueSlots = multiQueueManager.getAllSlotStates(),
+                dspState = dspState,
+                signalPathReport = currentSignalReport,
+                lyrics = currentLyrics,
+                cueSlices = currentCueSlices,
+                bookmarks = currentAudioTrack?.let { multiQueueManager.getBookmarksForMedia(it.id) }.orEmpty() + bookmarks.filter { it.mediaId == currentAudioTrack?.id }.distinctBy { it.id },
+                sleepTimerRemainingMin = sleepTimerRemainingMin,
+                onDismiss = { showAudiophilePlayerSheet = false },
+                onPlayPauseToggle = { isAudioPlaying = !isAudioPlaying },
+                onSeekToMs = { pos ->
+                    audioPositionMs = pos
+                    try {
+                        exoPlayer?.seekTo(pos)
+                    } catch (_: Throwable) {
+                    }
+                },
+                onSkipPrevious = {
+                    if (audioPositionMs > 3_000L) {
+                        audioPositionMs = 0L
+                        try {
+                            exoPlayer?.seekTo(0L)
+                        } catch (_: Throwable) {
+                        }
+                    } else {
+                        val prevIdx = (activeQueueState.activeIndex - 1).coerceAtLeast(0)
+                        multiQueueManager.selectTrackAt(prevIdx, resetAbLoop = false)
+                        audioPositionMs = 0L
+                    }
+                },
+                onSkipNext = {
+                    val nextIdx = (activeQueueState.activeIndex + 1) % activeQueueState.tracks.size.coerceAtLeast(1)
+                    multiQueueManager.selectTrackAt(nextIdx, resetAbLoop = false)
+                    audioPositionMs = 0L
+                },
+                onCycleLoopMode = { multiQueueManager.cycleLoopMode() },
+                onMarkAbStart = { multiQueueManager.markAbPointA(it) },
+                onMarkAbEnd = { multiQueueManager.markAbPointB(it) },
+                onNudgeAbBounds = { dStart, dEnd ->
+                    multiQueueManager.nudgeAbBounds(dStart, dEnd, audioDurationMs.coerceAtLeast(1000L))
+                },
+                onSetAbMaxLoops = { multiQueueManager.setAbMaxIterations(it) },
+                onClearAbLoop = { multiQueueManager.clearAbLoop() },
+                onToggleShuffle = { multiQueueManager.toggleShuffle() },
+                onSwitchQueueSlot = { slot ->
+                    val switched = multiQueueManager.switchQueueSlot(slot, audioPositionMs)
+                    audioPositionMs = switched.savedPositionMs
+                },
+                onSelectQueueTrack = { idx ->
+                    multiQueueManager.selectTrackAt(idx)
+                    audioPositionMs = 0L
+                    isAudioPlaying = true
+                },
+                onMoveQueueTrack = { from, to -> multiQueueManager.moveQueueItem(from, to) },
+                onRemoveQueueTrack = { idx -> multiQueueManager.removeFromQueue(idx) },
+                onSaveQueueM3u8 = {
+                    val outDir = File(context.filesDir, "playlists")
+                    val m3u = multiQueueManager.saveActiveQueueAsM3u8(outDir, activeQueueState.slot.displayName)
+                    statusNoticeText = "Saved playlist: ${m3u.name}"
+                },
+                onSelectOutputSignalMode = { audioDspController.setOutputSignalMode(it) },
+                onChangeSpeedAndPitch = { spd, pitch, c432 ->
+                    audioDspController.setPlaybackSpeedAndPitch(spd, pitch, c432)
+                },
+                onToggleSkipSilence = { audioDspController.setSkipSilence(it) },
+                onChangeCrossfadeSec = { audioDspController.setCrossfadeDurationSec(it) },
+                onChangeCrossfeedPercent = { audioDspController.setCrossfeedPercent(it) },
+                onChangeChannelBalance = { audioDspController.setChannelBalance(it) },
+                onChangeReplayGainMode = { audioDspController.setReplayGainMode(it) },
+                onSetSleepTimerMin = { sleepTimerRemainingMin = it },
+                onAddBookmark = { label ->
+                    currentAudioTrack?.let { multiQueueManager.addBookmark(it.id, audioPositionMs, label) }
+                },
+                onRemoveBookmark = { multiQueueManager.removeBookmark(it) },
+                onSaveTagEdits = { title, artist, album ->
+                    currentAudioTrack?.let {
+                        mediaRepository.updateMediaTags(it.id, title, artist, album)
+                        statusNoticeText = "Saved tags for '$title'"
+                    }
+                },
+                onOpenEqStudio = {
+                    showAudiophilePlayerSheet = false
+                    isEqSheetMinimized = false
+                    showEqStudioSheet = true
+                },
+                onOpenTrimmerForCurrent = {}
             )
-            multiQueueManager.playNext(audioEquivalent)
-            val targetIdx = (activeQueueState.activeIndex + 1).coerceAtMost(multiQueueManager.activeQueueState.value.tracks.lastIndex)
-            multiQueueManager.selectTrackAt(targetIdx, resetAbLoop = false)
-            audioPositionMs = posMs
-            isAudioPlaying = true
-        },
-        onEnterPipMode = onRequestPipMode,
-        onOpenTrimmerForVideo = {}
-    )
-
-    // 5. Details & Vault Sheet
-    val currentInspectionReport = remember(inspectorTargetItem) {
-        inspectorTargetItem?.let { inspectorAndVaultEngine.inspectMediaItem(it) }
-    }
-
-    MediaInspectorAndVaultSheet(
-        visible = showInspectorVaultSheet,
-        initialTab = inspectorInitialTab,
-        targetItem = inspectorTargetItem ?: allMediaItems.firstOrNull(),
-        inspectionReport = currentInspectionReport ?: allMediaItems.firstOrNull()?.let { inspectorAndVaultEngine.inspectMediaItem(it) },
-        vaultUnlocked = vaultUnlockedState,
-        vaultItems = vaultItems,
-        trashedItems = trashedItems,
-        duplicateGroups = duplicateGroups,
-        onDismiss = { showInspectorVaultSheet = false },
-        onScrubExifPrivacy = { item ->
-            val outDir = File(context.filesDir, "cleaned")
-            val cleanItem = inspectorAndVaultEngine.scrubExifPrivacyMetadata(item, outDir)
-            mediaRepository.addOrUpdateMediaItem(cleanItem)
-            inspectorTargetItem = cleanItem
-            statusNoticeText = "Removed location metadata: ${cleanItem.title}"
-        },
-        onUnlockVaultPin = { pin ->
-            val ok = inspectorAndVaultEngine.unlockVaultWithPin(pin)
-            vaultUnlockedState = inspectorAndVaultEngine.isVaultUnlocked()
-            ok
-        },
-        onLockVault = {
-            inspectorAndVaultEngine.lockVault()
-            vaultUnlockedState = false
-        },
-        onToggleVaultItem = { item, toVault ->
-            mediaRepository.setVaulted(item.id, toVault)
-            statusNoticeText = if (toVault) "Hidden '${item.title}'" else "Restored '${item.title}'"
-        },
-        onMoveToTrash = { item ->
-            mediaRepository.moveToTrash(item.id)
-        },
-        onRestoreFromTrash = { item ->
-            mediaRepository.restoreFromTrash(item.id)
         }
-    )
+
+        // 3. Equalizer Sheet (Lazy-mounted, no bottom nav bar overlap)
+        if (showEqStudioSheet) {
+            AudioEqStudioSheet(
+                visible = true,
+                isMinimized = false,
+                onMinimizedChange = {},
+                dspState = dspState,
+                presets = audioDspController.allPresets(),
+                spectrumBins = spectrumBins,
+                waveformSamples = waveformSamples,
+                isLosslessTrack = currentAudioTrack?.isLossless ?: true,
+                onDismiss = { showEqStudioSheet = false },
+                onToggleEqEnabled = { audioDspController.setEqEnabled(it) },
+                onToggleParametricMode = { audioDspController.setParametricMode(it) },
+                onChangePreampDb = { audioDspController.setPreampDb(it) },
+                onChangeBandGain = { idx, gain -> audioDspController.setBandGain(idx, gain) },
+                onUpdateParametricBand = { idx, fc, gain, q ->
+                    audioDspController.updateParametricBand(idx, fc, gain, q)
+                },
+                onApplyPreset = { audioDspController.applyPreset(it) },
+                onSaveCustomPreset = { name ->
+                    audioDspController.saveCustomPreset(name)
+                    statusNoticeText = "Saved preset: $name"
+                },
+                onImportAutoEqProfile = { name, txt ->
+                    val preset = audioDspController.importAutoEqProfile(name, txt)
+                    statusNoticeText = "Applied ${preset.name}"
+                },
+                onChangeBassBoost = { audioDspController.setBassBoostPercent(it) },
+                onChangeVirtualizer = { audioDspController.setVirtualizerPercent(it) },
+                onChangeLoudnessDb = { audioDspController.setLoudnessGainDb(it) },
+                onSwitchOutputDevice = { audioDspController.switchOutputDevice(it) },
+                onChangeVisualizerMode = { audioDspController.setVisualizerMode(it) }
+            )
+        }
+
+        // 4. Real Video Player Sheet (Lazy-mounted so ExoPlayer is allocated only during video playback)
+        if (showVideoTheaterSheet) {
+            var currentVideoSubtitles by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
+            LaunchedEffect(activeVideoItem?.filePath) {
+                val path = activeVideoItem?.filePath ?: ""
+                if (path.isBlank()) {
+                    currentVideoSubtitles = emptyList()
+                    return@LaunchedEffect
+                }
+                withContext(Dispatchers.IO) {
+                    val base = path.substringBeforeLast('.')
+                    val srtFile = File("$base.srt")
+                    val enFile = File("$base.en.srt")
+                    val secondFile = File("$base.jp.srt")
+                    val primaryCues = when {
+                        srtFile.exists() -> VideoTheaterEngine.parseSrtSubtitles(srtFile.readText())
+                        enFile.exists() -> VideoTheaterEngine.parseSrtSubtitles(enFile.readText())
+                        else -> emptyList()
+                    }
+                    val secondaryCues = if (secondFile.exists()) {
+                        VideoTheaterEngine.parseSrtSubtitles(secondFile.readText())
+                    } else emptyList()
+                    currentVideoSubtitles = VideoTheaterEngine.mergeDualSubtitles(primaryCues, secondaryCues)
+                }
+            }
+
+            VideoTheaterSheet(
+                visible = true,
+                videoItem = activeVideoItem,
+                seriesEpisodes = activeVideoItem?.let { videoTheaterEngine.getSeriesEpisodes(allMediaItems, it) }.orEmpty(),
+                nextEpisode = activeVideoItem?.let { videoTheaterEngine.findNextEpisode(allMediaItems, it) },
+                chapters = videoTheaterEngine.defaultChaptersForVideo(activeVideoItem?.durationMs ?: 18_000L),
+                subtitleCues = currentVideoSubtitles,
+                sceneBookmarks = activeVideoItem?.let { videoTheaterEngine.getSceneBookmarks(it.id) }.orEmpty(),
+                folderSkipRule = activeVideoItem?.let { videoTheaterEngine.getFolderSkipRule(it) } ?: com.arinara.photos.media.FolderSkipRule("Default"),
+                isPlaying = isVideoPlaying,
+                playbackPositionMs = videoPositionMs,
+                videoDurationMs = activeVideoItem?.durationMs ?: 18_000L,
+                playbackSpeed = videoPlaybackSpeed,
+                onDismiss = {
+                    activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, videoPositionMs) }
+                    isVideoPlaying = false
+                    showVideoTheaterSheet = false
+                },
+                onPlayPauseToggle = { isVideoPlaying = !isVideoPlaying },
+                onSeekToMs = { pos ->
+                    videoPositionMs = pos
+                    activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, pos) }
+                },
+                onSetPlaybackSpeed = { videoPlaybackSpeed = it },
+                onSelectEpisode = { ep ->
+                    activeVideoItem?.let { mediaRepository.updateResumePosition(it.id, videoPositionMs) }
+                    activeVideoItem = ep
+                    videoPositionMs = ep.resumePositionMs
+                    isVideoPlaying = true
+                },
+                onSaveFolderSkipRule = { rule ->
+                    videoTheaterEngine.setFolderSkipRule(rule)
+                },
+                onAddSceneBookmark = { caption ->
+                    activeVideoItem?.let { videoTheaterEngine.addSceneBookmark(it.id, videoPositionMs, caption) }
+                },
+                onCaptureFramePng = { vid, tsMs ->
+                    val outDir = File(context.filesDir, "captures")
+                    val frameItem = mediaTrimmerEngine.captureVideoFrameStill(outDir, vid, tsMs, losslessPng = true)
+                    mediaRepository.addOrUpdateMediaItem(frameItem)
+                    statusNoticeText = "Saved frame: ${frameItem.title}"
+                },
+                onGenerateStoryboard = {},
+                onHandOffToBackgroundAudio = { vid, posMs ->
+                    isVideoPlaying = false
+                    showVideoTheaterSheet = false
+                    val audioEquivalent = vid.copy(
+                        mediaType = MediaType.AUDIO,
+                        qualityBadge = vid.extension
+                    )
+                    multiQueueManager.playNext(audioEquivalent)
+                    val targetIdx = (activeQueueState.activeIndex + 1).coerceAtMost(multiQueueManager.activeQueueState.value.tracks.lastIndex)
+                    multiQueueManager.selectTrackAt(targetIdx, resetAbLoop = false)
+                    audioPositionMs = posMs
+                    isAudioPlaying = true
+                },
+                onEnterPipMode = onRequestPipMode,
+                onOpenTrimmerForVideo = {}
+            )
+        }
+
+        // 5. Details & Vault Sheet (Lazy-mounted & computes SHA-256 / RGB Histogram off the main thread)
+        if (showInspectorVaultSheet) {
+            val targetForInspector = inspectorTargetItem ?: allMediaItems.firstOrNull()
+            var currentInspectionReport by remember { mutableStateOf<DeepMediaInspectionReport?>(null) }
+            var duplicateGroups by remember { mutableStateOf<List<DuplicateGroup>>(emptyList()) }
+
+            LaunchedEffect(targetForInspector?.id, allMediaItems.size) {
+                withContext(Dispatchers.IO) {
+                    currentInspectionReport = targetForInspector?.let { inspectorAndVaultEngine.inspectMediaItem(it) }
+                    duplicateGroups = inspectorAndVaultEngine.findDuplicatesAndBurstGroups(allMediaItems)
+                }
+            }
+
+            MediaInspectorAndVaultSheet(
+                visible = true,
+                initialTab = inspectorInitialTab,
+                targetItem = targetForInspector,
+                inspectionReport = currentInspectionReport,
+                vaultUnlocked = vaultUnlockedState,
+                vaultItems = vaultItems,
+                trashedItems = trashedItems,
+                duplicateGroups = duplicateGroups,
+                onDismiss = { showInspectorVaultSheet = false },
+                onScrubExifPrivacy = { item ->
+                    val outDir = File(context.filesDir, "cleaned")
+                    val cleanItem = inspectorAndVaultEngine.scrubExifPrivacyMetadata(item, outDir)
+                    mediaRepository.addOrUpdateMediaItem(cleanItem)
+                    inspectorTargetItem = cleanItem
+                    statusNoticeText = "Removed location metadata: ${cleanItem.title}"
+                },
+                onUnlockVaultPin = { pin ->
+                    val ok = inspectorAndVaultEngine.unlockVaultWithPin(pin)
+                    vaultUnlockedState = inspectorAndVaultEngine.isVaultUnlocked()
+                    ok
+                },
+                onLockVault = {
+                    inspectorAndVaultEngine.lockVault()
+                    vaultUnlockedState = false
+                },
+                onToggleVaultItem = { item, toVault ->
+                    mediaRepository.setVaulted(item.id, toVault)
+                    statusNoticeText = if (toVault) "Hidden '${item.title}'" else "Restored '${item.title}'"
+                },
+                onMoveToTrash = { item ->
+                    mediaRepository.moveToTrash(item.id)
+                },
+                onRestoreFromTrash = { item ->
+                    mediaRepository.restoreFromTrash(item.id)
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -1555,6 +1640,18 @@ private fun UniversalMediaTileCard(
     onOpenPrimary: () -> Unit,
     onToggleFavorite: () -> Unit
 ) {
+    val context = LocalContext.current
+    val thumbSizePx = if (compact) 256 else 384
+    val thumbnailRequest = remember(item.id, item.uriString, thumbSizePx) {
+        ImageRequest.Builder(context)
+            .data(Uri.parse(item.uriString))
+            .size(thumbSizePx, thumbSizePx)
+            .crossfade(false)
+            .memoryCacheKey("thumb_${item.id}_$thumbSizePx")
+            .diskCacheKey("thumb_${item.id}")
+            .build()
+    }
+
     AppCard(
         modifier = modifier,
         onClick = onOpenPrimary,
@@ -1571,7 +1668,7 @@ private fun UniversalMediaTileCard(
             when (item.mediaType) {
                 MediaType.PHOTO, MediaType.RAW_PHOTO, MediaType.ANIMATED -> {
                     AsyncImage(
-                        model = File(item.filePath).takeIf { it.exists() } ?: Uri.parse(item.uriString),
+                        model = thumbnailRequest,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -1579,7 +1676,7 @@ private fun UniversalMediaTileCard(
                 }
                 MediaType.VIDEO -> {
                     AsyncImage(
-                        model = File(item.filePath).takeIf { it.exists() } ?: Uri.parse(item.uriString),
+                        model = thumbnailRequest,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()

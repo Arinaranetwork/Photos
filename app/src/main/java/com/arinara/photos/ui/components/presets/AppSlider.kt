@@ -88,7 +88,9 @@ fun AppSlider(
                 detectTapGestures(
                     onTap = { offset ->
                         if (!currentEnabled) return@detectTapGestures
-                        val fraction = (offset.x / size.width).coerceIn(0f, 1f)
+                        val padPx = 14.dp.toPx()
+                        val usableW = (size.width - padPx * 2f).coerceAtLeast(1f)
+                        val fraction = ((offset.x - padPx) / usableW).coerceIn(0f, 1f)
                         val targetVal = calculateValueFromFraction(fraction)
 
                         coroutineScope.launch {
@@ -104,7 +106,9 @@ fun AppSlider(
                     onDragStart = { offset ->
                         if (currentEnabled) {
                             isDragging = true
-                            val fraction = (offset.x / size.width).coerceIn(0f, 1f)
+                            val padPx = 14.dp.toPx()
+                            val usableW = (size.width - padPx * 2f).coerceAtLeast(1f)
+                            val fraction = ((offset.x - padPx) / usableW).coerceIn(0f, 1f)
                             val targetVal = calculateValueFromFraction(fraction)
                             if (targetVal != currentValue) {
                                 currentOnValueChange(targetVal)
@@ -120,7 +124,9 @@ fun AppSlider(
                     onHorizontalDrag = { change, _ ->
                         if (!currentEnabled) return@detectHorizontalDragGestures
                         change.consume()
-                        val fraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                        val padPx = 14.dp.toPx()
+                        val usableW = (size.width - padPx * 2f).coerceAtLeast(1f)
+                        val fraction = ((change.position.x - padPx) / usableW).coerceIn(0f, 1f)
                         val targetVal = calculateValueFromFraction(fraction)
 
                         if (targetVal != currentValue) {
@@ -143,24 +149,28 @@ fun AppSlider(
             val centerY = canvasHeight / 2f
             val trackHeight = 6.dp.toPx()
             val thumbRadius = 10.dp.toPx()
+            val horizontalPad = 14.dp.toPx()
+            val usableWidth = (canvasWidth - horizontalPad * 2f).coerceAtLeast(1f)
 
             val normalizedFraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-            val thumbX = (normalizedFraction * canvasWidth) + thumbSnapBounceAnim.value
+            val thumbX = (horizontalPad + normalizedFraction * usableWidth + thumbSnapBounceAnim.value)
+                .coerceIn(horizontalPad, canvasWidth - horizontalPad)
 
             // 1. Draw Inactive Track
             drawRoundRect(
                 color = inactiveTrackColor,
-                topLeft = Offset(0f, centerY - trackHeight / 2f),
-                size = Size(canvasWidth, trackHeight),
+                topLeft = Offset(horizontalPad, centerY - trackHeight / 2f),
+                size = Size(usableWidth, trackHeight),
                 cornerRadius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
             )
 
             // 2. Draw Active Track Fill
-            if (thumbX > 0f) {
+            val activeWidth = (thumbX - horizontalPad).coerceIn(0f, usableWidth)
+            if (activeWidth > 0f) {
                 drawRoundRect(
                     color = activeTrackColor,
-                    topLeft = Offset(0f, centerY - trackHeight / 2f),
-                    size = Size(thumbX.coerceAtMost(canvasWidth), trackHeight),
+                    topLeft = Offset(horizontalPad, centerY - trackHeight / 2f),
+                    size = Size(activeWidth, trackHeight),
                     cornerRadius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
                 )
             }
@@ -169,7 +179,7 @@ fun AppSlider(
             if (steps > 0 && totalPoints > 1) {
                 val dotRadius = 2.dp.toPx()
                 for (i in 0 until totalPoints) {
-                    val dotX = (i.toFloat() / (totalPoints - 1)) * canvasWidth
+                    val dotX = horizontalPad + (i.toFloat() / (totalPoints - 1)) * usableWidth
                     val isPassed = dotX <= thumbX + 1f
                     drawCircle(
                         color = if (isPassed) dotActiveColor else dotInactiveColor,
@@ -183,18 +193,18 @@ fun AppSlider(
             val currentThumbRadius = thumbRadius * thumbScaleAnim.value
             drawCircle(
                 color = activeTrackColor.copy(alpha = 0.25f),
-                radius = currentThumbRadius + 6.dp.toPx(),
-                center = Offset(thumbX.coerceIn(0f, canvasWidth), centerY)
+                radius = currentThumbRadius + 4.dp.toPx(),
+                center = Offset(thumbX, centerY)
             )
             drawCircle(
                 color = thumbColor,
                 radius = currentThumbRadius,
-                center = Offset(thumbX.coerceIn(0f, canvasWidth), centerY)
+                center = Offset(thumbX, centerY)
             )
             drawCircle(
-                color = Color.White,
+                color = ElectricSlateTokens.TextPrimary,
                 radius = currentThumbRadius * 0.35f,
-                center = Offset(thumbX.coerceIn(0f, canvasWidth), centerY)
+                center = Offset(thumbX, centerY)
             )
         }
     }

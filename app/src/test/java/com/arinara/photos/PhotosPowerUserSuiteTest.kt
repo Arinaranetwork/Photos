@@ -320,6 +320,24 @@ class PhotosPowerUserSuiteTest {
 
         val fft = dsp.generateSpectrumFrame(playbackPositionMs = 2_400L, isPlaying = true, isLossless = true)
         assertEquals(32, fft.size)
+
+        // Real Biquad Frequency Response Curve (96 points from 20Hz..20kHz)
+        dsp.setEqEnabled(true)
+        dsp.setParametricMode(false)
+        dsp.applyPreset("Bass Boost")
+        val responseCurve = AudioDspController.computeFrequencyResponseCurveDb(dsp.dspState.value, numPoints = 96)
+        assertEquals(96, responseCurve.size)
+        // Bass frequencies (index 4) have higher dB gain than mid frequencies (index 48) in Bass Boost preset
+        assertTrue(responseCurve[4] > responseCurve[48])
+
+        // Real-time spectrum & waterfall history ring buffer updates immediately on EQ change
+        val activeFrame = dsp.generateSpectrumFrame(playbackPositionMs = 3_000L, isPlaying = true, isLossless = true)
+        assertTrue(activeFrame.any { it > 0.05f })
+        assertTrue(dsp.getWaterfallHistorySnapshot().isNotEmpty())
+
+        // Paused playback produces a true flatline (all 0.0f)
+        val pausedFrame = dsp.generateSpectrumFrame(playbackPositionMs = 3_000L, isPlaying = false, isLossless = true)
+        assertTrue(pausedFrame.all { it == 0.0f })
     }
 
     @Test
