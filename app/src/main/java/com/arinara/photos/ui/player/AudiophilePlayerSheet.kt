@@ -6,15 +6,15 @@
 
 package com.arinara.photos.ui.player
 
-import androidx.compose.foundation.BorderStroke
+import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,28 +29,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.BookmarkAdd
-import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Equalizer
 import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Lyrics
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.QueueMusic
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RepeatOne
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,11 +57,13 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.arinara.photos.data.model.AudioBookmark
 import com.arinara.photos.data.model.CueTrackSlice
 import com.arinara.photos.data.model.LoopMode
@@ -95,11 +92,11 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 enum class PlayerSubTab(val label: String) {
-    NOW_PLAYING("Deck & Loop"),
-    UP_NEXT_QUEUES("Up Next & 5 Queues"),
-    LYRICS_CUE("LRC & CUE"),
-    SPEED_DSP("Pitch & Signal"),
-    TAGS_BOOKMARKS("Tags & Notes")
+    NOW_PLAYING("Player"),
+    UP_NEXT_QUEUES("Queue"),
+    LYRICS_CUE("Lyrics"),
+    SPEED_DSP("Audio"),
+    TAGS_BOOKMARKS("Tags")
 }
 
 @Composable
@@ -150,7 +147,7 @@ fun AudiophilePlayerSheet(
     onOpenEqStudio: () -> Unit,
     onOpenTrimmerForCurrent: () -> Unit
 ) {
-    if (currentTrack == null) return
+    if (!visible || currentTrack == null) return
 
     var activeSubTab by remember { mutableStateOf(PlayerSubTab.NOW_PLAYING) }
     var showSignalPathInspector by remember { mutableStateOf(false) }
@@ -159,7 +156,7 @@ fun AudiophilePlayerSheet(
     var editTitle by remember(currentTrack.id) { mutableStateOf(currentTrack.title) }
     var editArtist by remember(currentTrack.id) { mutableStateOf(currentTrack.artist) }
     var editAlbum by remember(currentTrack.id) { mutableStateOf(currentTrack.album) }
-    var newBookmarkLabel by remember { mutableStateOf("Chorus / Solo Highlight") }
+    var newBookmarkLabel by remember { mutableStateOf("Bookmark") }
 
     val safeDuration = trackDurationMs.coerceAtLeast(1000L)
     val progressFraction = (playbackPositionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
@@ -167,7 +164,7 @@ fun AudiophilePlayerSheet(
     AppBottomSheet(
         visible = visible,
         onDismiss = onDismiss,
-        title = "Audiophile Hi-Res Deck"
+        title = "Now Playing"
     ) {
         Column(
             modifier = Modifier
@@ -175,7 +172,6 @@ fun AudiophilePlayerSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Sub-Navigation Pills
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -189,7 +185,7 @@ fun AudiophilePlayerSheet(
                 }
             }
 
-            // Track Header Card + Tappable Lossless Signal Path Badge (F-A07)
+            // Track Header Card with Real Album Art
             AppCard(
                 modifier = Modifier.fillMaxWidth(),
                 isGlow = currentTrack.isLossless,
@@ -201,6 +197,29 @@ fun AudiophilePlayerSheet(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(ElectricSlateTokens.SurfaceElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.MusicNote,
+                            contentDescription = null,
+                            tint = ElectricSlateTokens.PrimaryAccent,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        if (!currentTrack.albumArtUriString.isNullOrBlank()) {
+                            AsyncImage(
+                                model = Uri.parse(currentTrack.albumArtUriString),
+                                contentDescription = currentTrack.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = currentTrack.title,
@@ -221,25 +240,16 @@ fun AudiophilePlayerSheet(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = currentTrack.audioSpecSummary,
-                            fontFamily = ElmsSans,
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 11.sp,
-                            color = ElectricSlateTokens.PrimaryAccent
-                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     AppPillChip(
-                        label = if (signalPathReport.isBitPerfectActive) "BIT-PERFECT" else currentTrack.qualityBadge,
+                        label = currentTrack.extension,
                         leadingIcon = Icons.Outlined.GraphicEq,
                         isSelected = showSignalPathInspector,
                         onClick = { showSignalPathInspector = !showSignalPathInspector }
                     )
                 }
 
-                // ConnectedInspector Signal Path Chain Popup (F-A07)
                 if (showSignalPathInspector) {
                     Spacer(modifier = Modifier.height(10.dp))
                     ConnectedInspector(
@@ -247,32 +257,15 @@ fun AudiophilePlayerSheet(
                         panelWidth = 310.dp,
                         neckHeight = 14.dp
                     ) {
-                        Text(
-                            text = "Lossless Signal Path Chain",
-                            fontFamily = ElmsSans,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = ElectricSlateTokens.PrimaryAccent
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SignalStageRow("1. Source", "${signalPathReport.sourceCodec} (${signalPathReport.sourceBitDepth}-bit / ${signalPathReport.sourceSampleRateHz / 1000}kHz • ${signalPathReport.sourceBitrateKbps}kbps)")
-                        SignalStageRow("2. Engine", signalPathReport.dspEngineDescription)
-                        SignalStageRow("3. Output", "${signalPathReport.outputDeviceName} @ ${signalPathReport.outputSampleRateHz / 1000}kHz")
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = signalPathReport.trueLosslessVerdict,
-                            fontFamily = ElmsSans,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.sp,
-                            color = ElectricSlateTokens.TextPrimary
-                        )
+                        SignalStageRow("Format", "${signalPathReport.sourceCodec} (${signalPathReport.sourceBitrateKbps} kbps)")
+                        SignalStageRow("Sample Rate", "${signalPathReport.sourceSampleRateHz / 1000} kHz / ${signalPathReport.sourceBitDepth}-bit")
+                        SignalStageRow("Output", signalPathReport.outputDeviceName)
                     }
                 }
             }
 
             when (activeSubTab) {
                 PlayerSubTab.NOW_PLAYING -> {
-                    // Interactive Waveform Seekbar + A-B Loop Brackets (F-A02 & F-A03)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -284,13 +277,12 @@ fun AudiophilePlayerSheet(
                         Canvas(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(54.dp)
+                                .height(48.dp)
                         ) {
                             val barCount = 44
                             val spacing = size.width / barCount
                             val barW = (spacing * 0.58f).coerceAtLeast(2.dp.toPx())
 
-                            // Highlight A-B loop region if active
                             if (abStartFrac != null && abEndFrac != null && abEndFrac > abStartFrac) {
                                 val xStart = abStartFrac * size.width
                                 val xEnd = abEndFrac * size.width
@@ -323,7 +315,7 @@ fun AudiophilePlayerSheet(
                         }
 
                         AppSlider(
-                            value = playbackPositionMs.toFloat(),
+                            value = playbackPositionMs.toFloat().coerceIn(0f, safeDuration.toFloat()),
                             onValueChange = { onSeekToMs(it.toLong()) },
                             valueRange = 0f..safeDuration.toFloat(),
                             steps = 0
@@ -341,7 +333,7 @@ fun AudiophilePlayerSheet(
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             Text(
-                                text = "-${MediaItem.formatDurationMillis((safeDuration - playbackPositionMs).coerceAtLeast(0L))} / ${MediaItem.formatDurationMillis(safeDuration)}",
+                                text = MediaItem.formatDurationMillis(safeDuration),
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 12.sp,
@@ -350,21 +342,21 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    // Primary Transport Deck: 4-State Loop, Prev, Play/Pause, Next, Shuffle
+                    // Primary Transport Deck: Loop, Prev, Play/Pause, Next, Shuffle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AppPillChip(
-                            label = "${loopMode.label} (${loopMode.shortBadge})",
+                            label = loopMode.shortBadge,
                             leadingIcon = if (loopMode == LoopMode.TRACK) Icons.Outlined.RepeatOne else Icons.Outlined.Repeat,
                             isSelected = loopMode != LoopMode.OFF,
                             onClick = onCycleLoopMode
                         )
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -372,7 +364,6 @@ fun AudiophilePlayerSheet(
                                     .size(44.dp)
                                     .clip(CircleShape)
                                     .background(ElectricSlateTokens.SurfaceElevated)
-                                    .border(1.dp, ElectricSlateTokens.BorderSubtle, CircleShape)
                                     .jigglePressClickable(onClick = onSkipPrevious),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -389,7 +380,6 @@ fun AudiophilePlayerSheet(
                                     .size(56.dp)
                                     .clip(CircleShape)
                                     .background(ElectricSlateTokens.PrimaryAccent)
-                                    .border(1.dp, ElectricSlateTokens.PrimaryAccent, CircleShape)
                                     .jigglePressClickable(onClick = onPlayPauseToggle),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -406,7 +396,6 @@ fun AudiophilePlayerSheet(
                                     .size(44.dp)
                                     .clip(CircleShape)
                                     .background(ElectricSlateTokens.SurfaceElevated)
-                                    .border(1.dp, ElectricSlateTokens.BorderSubtle, CircleShape)
                                     .jigglePressClickable(onClick = onSkipNext),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -420,14 +409,14 @@ fun AudiophilePlayerSheet(
                         }
 
                         AppPillChip(
-                            label = if (activeQueueState.isShuffled) "Shuffled" else "Shuffle",
+                            label = "Shuffle",
                             leadingIcon = Icons.Outlined.Shuffle,
                             isSelected = activeQueueState.isShuffled,
                             onClick = onToggleShuffle
                         )
                     }
 
-                    // Precision A-B Section Loop Studio Panel (F-A03)
+                    // A-B Loop Card
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -439,24 +428,21 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Precision A-B Section Loop",
+                                text = "A-B Loop",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
-                            Text(
-                                text = if (abLoopState.isConfigured) {
-                                    "Loop #${abLoopState.completedIterations + 1}" +
-                                        if (abLoopState.maxIterations > 0) "/${abLoopState.maxIterations}" else " (∞)"
-                                } else {
-                                    "Tap Set A & Set B"
-                                },
-                                fontFamily = ElmsSans,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                color = ElectricSlateTokens.PrimaryAccent
-                            )
+                            if (abLoopState.isConfigured) {
+                                Text(
+                                    text = "Loop #${abLoopState.completedIterations + 1}",
+                                    fontFamily = ElmsSans,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    color = ElectricSlateTokens.PrimaryAccent
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(
@@ -481,22 +467,6 @@ fun AudiophilePlayerSheet(
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(1f)
                             )
-                            AppButton(
-                                text = "-0.1s",
-                                onClick = { onNudgeAbBounds(-100L, 0L) },
-                                variant = AppButtonVariant.OUTLINED,
-                                height = 36.dp,
-                                horizontalPadding = 8.dp,
-                                fontSize = 12.sp
-                            )
-                            AppButton(
-                                text = "+0.1s",
-                                onClick = { onNudgeAbBounds(0L, 100L) },
-                                variant = AppButtonVariant.OUTLINED,
-                                height = 36.dp,
-                                horizontalPadding = 8.dp,
-                                fontSize = 12.sp
-                            )
                             if (abLoopState.startMs != null) {
                                 AppButton(
                                     text = "Clear",
@@ -508,60 +478,25 @@ fun AudiophilePlayerSheet(
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Max Loops:",
-                                fontFamily = ElmsSans,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp,
-                                color = ElectricSlateTokens.TextMuted
-                            )
-                            listOf(0 to "∞", 3 to "3x", 5 to "5x", 10 to "10x").forEach { (count, label) ->
-                                AppPillChip(
-                                    label = label,
-                                    isSelected = abLoopState.maxIterations == count,
-                                    onClick = { onSetAbMaxLoops(count) }
-                                )
-                            }
-                        }
                     }
 
-                    // Quick Launch Row: 10-Band EQ Studio & Lossless Audio Cutter
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        AppButton(
-                            text = "10-Band EQ & Spectrogram",
-                            leadingIcon = Icons.Outlined.Equalizer,
-                            onClick = onOpenEqStudio,
-                            variant = AppButtonVariant.PRIMARY,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AppButton(
-                            text = "Cut / Convert Track",
-                            leadingIcon = Icons.Outlined.ContentCut,
-                            onClick = onOpenTrimmerForCurrent,
-                            variant = AppButtonVariant.SECONDARY,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    AppButton(
+                        text = "Equalizer",
+                        leadingIcon = Icons.Outlined.Equalizer,
+                        onClick = onOpenEqStudio,
+                        variant = AppButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 PlayerSubTab.UP_NEXT_QUEUES -> {
-                    // 5 Independent Multi-Queue Slots with Position Memory (F-A05)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
                         contentPadding = 12.dp
                     ) {
                         Text(
-                            text = "5 Multi-Queue Slots (Auto-Saves Track & Timestamp)",
+                            text = "Queues",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -576,11 +511,6 @@ fun AudiophilePlayerSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (isSelected) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                            RoundedCornerShape(12.dp)
-                                        )
                                         .jigglePressClickable { onSwitchQueueSlot(slotState.slot) }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -595,7 +525,7 @@ fun AudiophilePlayerSheet(
                                             color = ElectricSlateTokens.TextPrimary
                                         )
                                         Text(
-                                            text = "${slotState.tracks.size} tracks • Resume @ ${MediaItem.formatDurationMillis(slotState.savedPositionMs)}",
+                                            text = "${slotState.tracks.size} tracks",
                                             fontFamily = ElmsSans,
                                             fontWeight = FontWeight.Normal,
                                             fontSize = 11.sp,
@@ -604,7 +534,7 @@ fun AudiophilePlayerSheet(
                                     }
                                     if (isSelected) {
                                         Text(
-                                            text = "ACTIVE",
+                                            text = "Active",
                                             fontFamily = ElmsSans,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp,
@@ -616,7 +546,6 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    // Arrange What Plays Next — Reorderable Up Next List (F-A04)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -628,14 +557,14 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Arrange Up Next (${activeQueueState.tracks.size})",
+                                text = "Up Next (${activeQueueState.tracks.size})",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             AppButton(
-                                text = "Export .M3U8",
+                                text = "Save Playlist",
                                 leadingIcon = Icons.Outlined.Save,
                                 onClick = onSaveQueueM3u8,
                                 variant = AppButtonVariant.SECONDARY,
@@ -653,11 +582,6 @@ fun AudiophilePlayerSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (isCurrent) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                        .border(
-                                            1.dp,
-                                            if (isCurrent) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                            RoundedCornerShape(12.dp)
-                                        )
                                         .jigglePressClickable { onSelectQueueTrack(idx) }
                                         .padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -674,7 +598,7 @@ fun AudiophilePlayerSheet(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${track.artist} • ${track.qualityBadge} • ${track.formattedDuration}",
+                                            text = "${track.artist} • ${track.formattedDuration}",
                                             fontFamily = ElmsSans,
                                             fontWeight = FontWeight.Normal,
                                             fontSize = 11.sp,
@@ -693,7 +617,7 @@ fun AudiophilePlayerSheet(
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Outlined.ArrowUpward,
-                                                    contentDescription = "Move Up",
+                                                    contentDescription = "Up",
                                                     tint = ElectricSlateTokens.TextPrimary,
                                                     modifier = Modifier.size(16.dp)
                                                 )
@@ -710,7 +634,7 @@ fun AudiophilePlayerSheet(
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Outlined.ArrowDownward,
-                                                    contentDescription = "Move Down",
+                                                    contentDescription = "Down",
                                                     tint = ElectricSlateTokens.TextPrimary,
                                                     modifier = Modifier.size(16.dp)
                                                 )
@@ -741,7 +665,6 @@ fun AudiophilePlayerSheet(
                 }
 
                 PlayerSubTab.LYRICS_CUE -> {
-                    // Synced LRC Lyrics Engine with Tap-Line-to-Seek & Offset (F-A15)
                     val activeLyricIdx = MultiQueueManager.findActiveLyricIndex(lyrics, playbackPositionMs, lyricOffsetMs)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -754,7 +677,7 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Synced .LRC Lyrics (Tap Line to Seek)",
+                                text = "Lyrics",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
@@ -781,7 +704,7 @@ fun AudiophilePlayerSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                         if (lyrics.isEmpty()) {
                             Text(
-                                text = "No companion .LRC file found for this track.",
+                                text = "No .lrc lyrics file found for this track.",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -822,7 +745,6 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    // CUE Sheet Virtual Track Splitter (F-A16)
                     if (cueSlices.isNotEmpty()) {
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
@@ -830,7 +752,7 @@ fun AudiophilePlayerSheet(
                             contentPadding = 12.dp
                         ) {
                             Text(
-                                text = "CUE Sheet Virtual Chapters (${cueSlices.size} Tracks)",
+                                text = "Chapters (${cueSlices.size})",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
@@ -845,11 +767,6 @@ fun AudiophilePlayerSheet(
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(if (inSlice) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                            .border(
-                                                1.dp,
-                                                if (inSlice) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                                RoundedCornerShape(12.dp)
-                                            )
                                             .jigglePressClickable { onSeekToMs(slice.startMs) }
                                             .padding(horizontal = 10.dp, vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -864,20 +781,13 @@ fun AudiophilePlayerSheet(
                                                 color = ElectricSlateTokens.TextPrimary
                                             )
                                             Text(
-                                                text = "${slice.performer} • ${MediaItem.formatDurationMillis(slice.startMs)} – ${MediaItem.formatDurationMillis(slice.endMs)}",
+                                                text = "${MediaItem.formatDurationMillis(slice.startMs)} – ${MediaItem.formatDurationMillis(slice.endMs)}",
                                                 fontFamily = ElmsSans,
                                                 fontWeight = FontWeight.Normal,
                                                 fontSize = 11.sp,
                                                 color = ElectricSlateTokens.TextMuted
                                             )
                                         }
-                                        Text(
-                                            text = "JUMP",
-                                            fontFamily = ElmsSans,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            color = ElectricSlateTokens.PrimaryAccent
-                                        )
                                     }
                                 }
                             }
@@ -886,14 +796,13 @@ fun AudiophilePlayerSheet(
                 }
 
                 PlayerSubTab.SPEED_DSP -> {
-                    // Output Signal Quality & Resampler Mode Switcher (F-A08)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
                         contentPadding = 12.dp
                     ) {
                         Text(
-                            text = "Output Signal Path & Resampler Mode",
+                            text = "Output Mode",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -908,32 +817,19 @@ fun AudiophilePlayerSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (selected) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                        .border(
-                                            1.dp,
-                                            if (selected) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                            RoundedCornerShape(12.dp)
-                                        )
                                         .jigglePressClickable { onSelectOutputSignalMode(mode) }
                                         .padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = mode.label,
-                                            fontFamily = ElmsSans,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 14.sp,
-                                            color = ElectricSlateTokens.TextPrimary
-                                        )
-                                        Text(
-                                            text = mode.description,
-                                            fontFamily = ElmsSans,
-                                            fontWeight = FontWeight.Normal,
-                                            fontSize = 11.sp,
-                                            color = ElectricSlateTokens.TextMuted
-                                        )
-                                    }
+                                    Text(
+                                        text = mode.label,
+                                        fontFamily = ElmsSans,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = ElectricSlateTokens.TextPrimary,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                     Text(
                                         text = mode.badge,
                                         fontFamily = ElmsSans,
@@ -946,7 +842,6 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    // Independent Pitch, Tempo & 432Hz Tuning (F-A10)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -958,14 +853,14 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Tempo (${String.format("%.2fx", dspState.playbackSpeed)}) & Pitch (${String.format("%+.1f st", dspState.pitchSemitones)})",
+                                text = "Speed (${String.format("%.2fx", dspState.playbackSpeed)}) & Pitch (${String.format("%+.1f", dspState.pitchSemitones)})",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             AppPillChip(
-                                label = if (dspState.concert432HzPitch) "432Hz Active" else "432Hz Natural",
+                                label = "432Hz",
                                 isSelected = dspState.concert432HzPitch,
                                 onClick = {
                                     onChangeSpeedAndPitch(
@@ -995,7 +890,6 @@ fun AudiophilePlayerSheet(
                         )
                     }
 
-                    // Smart Skip Silence, Crossfade, Crossfeed, Balance & Sleep Timer (F-A09, F-A11..F-A14)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -1006,31 +900,22 @@ fun AudiophilePlayerSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text(
-                                    text = "Smart Skip Silence",
-                                    fontFamily = ElmsSans,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = ElectricSlateTokens.TextPrimary
-                                )
-                                Text(
-                                    text = "Time Saved: ${MediaItem.formatDurationMillis(dspState.silenceSavedMs)}",
-                                    fontFamily = ElmsSans,
-                                    fontWeight = FontWeight.Normal,
-                                    fontSize = 11.sp,
-                                    color = ElectricSlateTokens.PrimaryAccent
-                                )
-                            }
+                            Text(
+                                text = "Skip Silence",
+                                fontFamily = ElmsSans,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = ElectricSlateTokens.TextPrimary
+                            )
                             AppPillChip(
-                                label = if (dspState.skipSilenceEnabled) "Active" else "Off",
+                                label = if (dspState.skipSilenceEnabled) "On" else "Off",
                                 isSelected = dspState.skipSilenceEnabled,
                                 onClick = { onToggleSkipSilence(!dspState.skipSilenceEnabled) }
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Crossfade: ${if (dspState.crossfadeDurationSec == 0) "Gapless (0s)" else "${dspState.crossfadeDurationSec}s"} • Headphone Crossfeed: ${dspState.crossfeedPercent}%",
+                            text = "Crossfade: ${dspState.crossfadeDurationSec}s",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
@@ -1042,14 +927,8 @@ fun AudiophilePlayerSheet(
                             valueRange = 0f..12f,
                             steps = 0
                         )
-                        AppSlider(
-                            value = dspState.crossfeedPercent.toFloat(),
-                            onValueChange = { onChangeCrossfeedPercent(it.roundToInt()) },
-                            valueRange = 0f..100f,
-                            steps = 0
-                        )
                         Text(
-                            text = "L/R Channel Balance: ${String.format("%+.2f", dspState.channelBalanceLR)}",
+                            text = "Balance: ${String.format("%+.2f", dspState.channelBalanceLR)}",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
@@ -1069,7 +948,7 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Sleep Fade:",
+                                text = "Sleep Timer:",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 12.sp,
@@ -1087,7 +966,6 @@ fun AudiophilePlayerSheet(
                 }
 
                 PlayerSubTab.TAGS_BOOKMARKS -> {
-                    // Timestamp Bookmarks & Study Notes (F-A18)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
@@ -1099,14 +977,14 @@ fun AudiophilePlayerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Timestamp Bookmarks (${bookmarks.size})",
+                                text = "Bookmarks (${bookmarks.size})",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             AppButton(
-                                text = "Bookmark @ ${MediaItem.formatDurationMillis(playbackPositionMs)}",
+                                text = "Add @ ${MediaItem.formatDurationMillis(playbackPositionMs)}",
                                 leadingIcon = Icons.Outlined.BookmarkAdd,
                                 onClick = { onAddBookmark(newBookmarkLabel) },
                                 variant = AppButtonVariant.PRIMARY,
@@ -1118,7 +996,7 @@ fun AudiophilePlayerSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                         if (bookmarks.isEmpty()) {
                             Text(
-                                text = "No bookmarks saved for this track yet.",
+                                text = "No bookmarks saved yet.",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -1132,7 +1010,6 @@ fun AudiophilePlayerSheet(
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(ElectricSlateTokens.BgCanvas)
-                                            .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                             .jigglePressClickable { onSeekToMs(bm.timestampMs) }
                                             .padding(horizontal = 10.dp, vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1159,14 +1036,13 @@ fun AudiophilePlayerSheet(
                         }
                     }
 
-                    // Built-in Audio Tag & Metadata Editor (F-A17)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
                         contentPadding = 12.dp
                     ) {
                         Text(
-                            text = "ID3 / FLAC / Vorbis Tag Editor",
+                            text = "Edit Tags",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -1180,7 +1056,7 @@ fun AudiophilePlayerSheet(
                         TagInputField("Album", editAlbum) { editAlbum = it }
                         Spacer(modifier = Modifier.height(10.dp))
                         AppButton(
-                            text = "Save Tags to Track",
+                            text = "Save",
                             leadingIcon = Icons.Outlined.Edit,
                             onClick = { onSaveTagEdits(editTitle, editArtist, editAlbum) },
                             variant = AppButtonVariant.PRIMARY,
@@ -1240,7 +1116,6 @@ private fun TagInputField(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(ElectricSlateTokens.BgCanvas)
-                .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             BasicTextField(

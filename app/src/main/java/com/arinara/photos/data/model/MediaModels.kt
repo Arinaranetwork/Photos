@@ -46,30 +46,30 @@ enum class LoopMode(val label: String, val shortBadge: String) {
 }
 
 enum class MediaFilter(val label: String) {
-    ALL("All Media"),
+    ALL("All"),
     PHOTOS("Photos"),
-    RAW_PRO("RAW & Pro"),
-    ANIMATED("GIF & WebP"),
+    RAW_PRO("RAW"),
+    ANIMATED("GIF"),
     VIDEO("Videos"),
-    AUDIO_LOSSLESS("Audio & Lossless"),
+    AUDIO_LOSSLESS("Music"),
     FAVORITES("Favorites"),
-    RECENT_CUTS("Studio Exports")
+    RECENT_CUTS("Exports")
 }
 
 enum class SortOrder(val label: String) {
-    DATE_DESC("Newest First"),
-    DATE_ASC("Oldest First"),
-    NAME_ASC("Name (A-Z)"),
-    SIZE_DESC("Largest Size"),
-    DURATION_DESC("Longest Duration"),
-    QUALITY_DESC("Highest Bitrate / Resolution")
+    DATE_DESC("Newest"),
+    DATE_ASC("Oldest"),
+    NAME_ASC("Name"),
+    SIZE_DESC("Size"),
+    DURATION_DESC("Duration"),
+    QUALITY_DESC("Quality")
 }
 
 data class MediaItem(
     val id: String,
     val title: String,
-    val artist: String = "Local Studio",
-    val album: String = "Camera Roll",
+    val artist: String = "",
+    val album: String = "Camera",
     val uriString: String,
     val filePath: String,
     val mimeType: String,
@@ -106,7 +106,8 @@ data class MediaItem(
     val apertureFNumber: String? = null,
     val isoSpeed: String? = null,
     val exposureTimeSec: String? = null,
-    val hasGpsCoordinates: Boolean = false
+    val hasGpsCoordinates: Boolean = false,
+    val albumArtUriString: String? = null
 ) {
     val formattedSize: String
         get() = when {

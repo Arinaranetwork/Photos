@@ -1,5 +1,5 @@
 # Rules - Photos
-Last Updated: 2026-10-24
+Last Updated: 2026-10-25
 
 ## Engineering
 ### R-001 - Strict Layered Architecture
@@ -20,6 +20,9 @@ Photo and album cards must strictly reproduce the brand aesthetic established in
 
 ### R-005 - Zero Placeholder Shipped Work
 All shipped screens and components must provide complete empty, loading, error, and populated states. No dummy mock data, TODOs, or fake stubs in production source code (`app/src/main/`). Reason: Ensures production-grade readiness at every milestone. Example violation: Leaving `// TODO: implement feature` or hardcoding sample lists in production viewmodels.
+
+### R-010 - Borderless Real-Media Player & Concise Consumer Copy
+All UI cards, chips, buttons, bottom sheets, and floating bars must render cleanly without 1dp structural outline borders (`Modifier.border(...)`). The app must index and play only real device media via Android `MediaStore` and `ExoPlayer` with automatic permission prompts on launch—never fabricated sample files, never a manual `"Scan Device"` button, never a `"Cut"` bottom tab, and never `"Studio"` branding or verbose technical descriptions. Reason: Delivers a clean, borderless visual hierarchy and authentic media playback experience. Example violation: Rendering `.border(1.dp, ...)` on cards, generating fake sample files at startup, or displaying `"Studio"` in user-facing text.
 
 ## Release
 ### R-006 - Release Artifact Discipline

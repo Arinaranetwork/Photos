@@ -8,7 +8,6 @@ package com.arinara.photos.ui.inspector
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,12 +24,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CleaningServices
-import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -62,9 +58,9 @@ import com.arinara.photos.ui.theme.ElectricSlateTokens
 import com.arinara.photos.ui.theme.jigglePressClickable
 
 enum class InspectorTab(val label: String) {
-    HISTOGRAM_EXIF("RGB Histogram & EXIF"),
-    PRIVATE_VAULT("PIN Private Vault"),
-    TRASH_DUPLICATES("Trash & Duplicates")
+    HISTOGRAM_EXIF("Info"),
+    PRIVATE_VAULT("Vault"),
+    TRASH_DUPLICATES("Trash")
 }
 
 @Composable
@@ -85,15 +81,17 @@ fun MediaInspectorAndVaultSheet(
     onMoveToTrash: (MediaItem) -> Unit,
     onRestoreFromTrash: (MediaItem) -> Unit
 ) {
+    if (!visible) return
+
     var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
     var pinInput by remember { mutableStateOf("") }
-    var pinStatusMessage by remember { mutableStateOf("Enter Vault PIN (Default: 2026 | Decoy: 0000)") }
+    var pinStatusMessage by remember { mutableStateOf("Enter 4-digit PIN (Default: 2026)") }
     var copiedHexNotice by remember { mutableStateOf<String?>(null) }
 
     AppBottomSheet(
         visible = visible,
         onDismiss = onDismiss,
-        title = "Deep EXIF, RGB Histogram & Private Vault"
+        title = "Details & Vault"
     ) {
         Column(
             modifier = Modifier
@@ -101,7 +99,6 @@ fun MediaInspectorAndVaultSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Sub-Navigation Pills
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -119,14 +116,13 @@ fun MediaInspectorAndVaultSheet(
                 InspectorTab.HISTOGRAM_EXIF -> {
                     if (targetItem == null || inspectionReport == null) {
                         Text(
-                            text = "Select any media item to inspect its 256-bin RGB histogram, EXIF metadata, and SHA-256 hash.",
+                            text = "Select an item to view its details.",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Normal,
                             fontSize = 14.sp,
                             color = ElectricSlateTokens.TextMuted
                         )
                     } else {
-                        // Live 256-Bin RGB + Luminance Histogram Card (F-G08)
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             cornerRadius = 16.dp,
@@ -138,14 +134,14 @@ fun MediaInspectorAndVaultSheet(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Live 256-Bin RGB + Luma Histogram",
+                                    text = "Histogram",
                                     fontFamily = ElmsSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = ElectricSlateTokens.TextPrimary
                                 )
                                 Text(
-                                    text = "DR ${String.format("%.1f EV", inspectionReport.histogram.dynamicRangeEv)}",
+                                    text = String.format("%.1f EV", inspectionReport.histogram.dynamicRangeEv),
                                     fontFamily = ElmsSans,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 11.sp,
@@ -160,10 +156,9 @@ fun MediaInspectorAndVaultSheet(
                             Canvas(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(96.dp)
+                                    .height(88.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(ElectricSlateTokens.BgCanvas)
-                                    .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                     .padding(8.dp)
                             ) {
                                 val w = size.width
@@ -194,30 +189,8 @@ fun MediaInspectorAndVaultSheet(
                                 drawPath(gPath, ElectricSlateTokens.PrimaryAccent, style = Stroke(width = 2.dp.toPx()))
                                 drawPath(yPath, ElectricSlateTokens.TextPrimary, style = Stroke(width = 1.5.dp.toPx()))
                             }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "Shadows Clip: ${String.format("%.1f%%", inspectionReport.histogram.shadowClipPercent)}",
-                                    fontFamily = ElmsSans,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp,
-                                    color = ElectricSlateTokens.TextMuted
-                                )
-                                Text(
-                                    text = "Highlights Clip: ${String.format("%.1f%%", inspectionReport.histogram.highlightClipPercent)}",
-                                    fontFamily = ElmsSans,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp,
-                                    color = ElectricSlateTokens.TextMuted
-                                )
-                            }
                         }
 
-                        // 6-Swatch Dominant Color Palette Extractor (F-G09)
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             cornerRadius = 16.dp,
@@ -229,7 +202,7 @@ fun MediaInspectorAndVaultSheet(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "6-Swatch Dominant Color Palette",
+                                    text = "Color Palette",
                                     fontFamily = ElmsSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
@@ -237,7 +210,7 @@ fun MediaInspectorAndVaultSheet(
                                 )
                                 if (copiedHexNotice != null) {
                                     Text(
-                                        text = "Copied $copiedHexNotice",
+                                        text = copiedHexNotice!!,
                                         fontFamily = ElmsSans,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
@@ -256,17 +229,15 @@ fun MediaInspectorAndVaultSheet(
                                             .weight(1f)
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(ElectricSlateTokens.BgCanvas)
-                                            .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                             .jigglePressClickable { copiedHexNotice = sw.hexCode }
                                             .padding(6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(24.dp)
+                                                .size(22.dp)
                                                 .clip(CircleShape)
                                                 .background(ElectricSlateTokens.PrimaryAccent)
-                                                .border(1.dp, ElectricSlateTokens.BorderSubtle, CircleShape)
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
@@ -277,40 +248,30 @@ fun MediaInspectorAndVaultSheet(
                                             color = ElectricSlateTokens.TextPrimary,
                                             maxLines = 1
                                         )
-                                        Text(
-                                            text = "${sw.populationPercent}%",
-                                            fontFamily = ElmsSans,
-                                            fontWeight = FontWeight.Normal,
-                                            fontSize = 10.sp,
-                                            color = ElectricSlateTokens.TextMuted
-                                        )
                                     }
                                 }
                             }
                         }
 
-                        // Deep EXIF, Codec Stream & SHA-256 Telemetry + 1-Tap EXIF Privacy Scrubber (F-G08 & F-G10)
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             cornerRadius = 16.dp,
                             contentPadding = 12.dp
                         ) {
                             Text(
-                                text = "Stream Codec & Camera EXIF Telemetry",
+                                text = "File Information",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = ElectricSlateTokens.TextPrimary
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            MetaRow("File Name", inspectionReport.fileName)
-                            MetaRow("Container & MIME", "${inspectionReport.containerFormat} (${inspectionReport.mimeType})")
+                            MetaRow("Name", inspectionReport.fileName)
+                            MetaRow("Format", inspectionReport.containerFormat)
                             MetaRow("Resolution", inspectionReport.resolutionSummary)
-                            MetaRow("Stream / Color", inspectionReport.codecSummary)
-                            MetaRow("Camera / Engine", inspectionReport.cameraMakeModel)
-                            MetaRow("Optics / Exposure", inspectionReport.lensAndExposure)
-                            MetaRow("GPS Privacy", inspectionReport.gpsStatus)
-                            MetaRow("SHA-256 Digest", inspectionReport.sha256Hex)
+                            MetaRow("Camera", inspectionReport.cameraMakeModel)
+                            MetaRow("Exposure", inspectionReport.lensAndExposure)
+                            MetaRow("Location", inspectionReport.gpsStatus)
 
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(
@@ -318,14 +279,14 @@ fun MediaInspectorAndVaultSheet(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 AppButton(
-                                    text = "1-Tap Scrub EXIF & GPS",
+                                    text = "Remove Location",
                                     leadingIcon = Icons.Outlined.CleaningServices,
                                     onClick = { onScrubExifPrivacy(targetItem) },
                                     variant = AppButtonVariant.PRIMARY,
                                     modifier = Modifier.weight(1f)
                                 )
                                 AppButton(
-                                    text = if (targetItem.isVaulted) "Restore Vault" else "Move to Vault",
+                                    text = if (targetItem.isVaulted) "Unhide" else "Hide",
                                     leadingIcon = Icons.Outlined.Lock,
                                     onClick = { onToggleVaultItem(targetItem, !targetItem.isVaulted) },
                                     variant = AppButtonVariant.SECONDARY
@@ -336,7 +297,6 @@ fun MediaInspectorAndVaultSheet(
                 }
 
                 InspectorTab.PRIVATE_VAULT -> {
-                    // PIN-Locked Private Vault (F-G11)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         isGlow = vaultUnlocked,
@@ -349,7 +309,7 @@ fun MediaInspectorAndVaultSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (vaultUnlocked) "Private Vault Unlocked" else "PIN-Locked Private Vault",
+                                text = if (vaultUnlocked) "Private Vault" else "Locked Vault",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
@@ -357,7 +317,7 @@ fun MediaInspectorAndVaultSheet(
                             )
                             if (vaultUnlocked) {
                                 AppButton(
-                                    text = "Lock Vault",
+                                    text = "Lock",
                                     leadingIcon = Icons.Outlined.Lock,
                                     onClick = onLockVault,
                                     variant = AppButtonVariant.SECONDARY,
@@ -383,7 +343,6 @@ fun MediaInspectorAndVaultSheet(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(ElectricSlateTokens.BgCanvas)
-                                    .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 BasicTextField(
@@ -401,7 +360,7 @@ fun MediaInspectorAndVaultSheet(
                                 )
                                 if (pinInput.isEmpty()) {
                                     Text(
-                                        text = "Enter 4-digit PIN (e.g. 2026)...",
+                                        text = "PIN...",
                                         fontFamily = ElmsSans,
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 14.sp,
@@ -410,30 +369,21 @@ fun MediaInspectorAndVaultSheet(
                                 }
                             }
                             Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                AppButton(
-                                    text = "Unlock with PIN",
-                                    leadingIcon = Icons.Outlined.LockOpen,
-                                    onClick = {
-                                        val ok = onUnlockVaultPin(pinInput.ifBlank { "2026" })
-                                        pinStatusMessage = if (ok) {
-                                            "Vault unlocked via SHA-256 salted PIN verification."
-                                        } else {
-                                            "Invalid PIN. Try default PIN 2026."
-                                        }
-                                    },
-                                    variant = AppButtonVariant.PRIMARY,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            AppButton(
+                                text = "Unlock",
+                                leadingIcon = Icons.Outlined.LockOpen,
+                                onClick = {
+                                    val ok = onUnlockVaultPin(pinInput.ifBlank { "2026" })
+                                    pinStatusMessage = if (ok) "Unlocked" else "Invalid PIN"
+                                },
+                                variant = AppButtonVariant.PRIMARY,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         } else {
                             Spacer(modifier = Modifier.height(8.dp))
                             if (vaultItems.isEmpty()) {
                                 Text(
-                                    text = "Vault is currently empty. Use 'Move to Vault' on any photo, video, or audio item to hide it from the public gallery.",
+                                    text = "No hidden items.",
                                     fontFamily = ElmsSans,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 12.sp,
@@ -447,7 +397,6 @@ fun MediaInspectorAndVaultSheet(
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .background(ElectricSlateTokens.BgCanvas)
-                                                .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                                 .padding(10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
@@ -461,7 +410,7 @@ fun MediaInspectorAndVaultSheet(
                                                     color = ElectricSlateTokens.TextPrimary
                                                 )
                                                 Text(
-                                                    text = "${vItem.qualityBadge} • ${vItem.formattedSize}",
+                                                    text = vItem.formattedSize,
                                                     fontFamily = ElmsSans,
                                                     fontWeight = FontWeight.Normal,
                                                     fontSize = 11.sp,
@@ -469,7 +418,7 @@ fun MediaInspectorAndVaultSheet(
                                                 )
                                             }
                                             AppButton(
-                                                text = "Restore",
+                                                text = "Unhide",
                                                 onClick = { onToggleVaultItem(vItem, false) },
                                                 variant = AppButtonVariant.SECONDARY,
                                                 height = 32.dp,
@@ -485,14 +434,13 @@ fun MediaInspectorAndVaultSheet(
                 }
 
                 InspectorTab.TRASH_DUPLICATES -> {
-                    // Duplicate & Burst Sequence Finder (F-G12)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
                         contentPadding = 12.dp
                     ) {
                         Text(
-                            text = "Duplicate & Similar Burst Finder (${duplicateGroups.size} Groups)",
+                            text = "Duplicates (${duplicateGroups.size})",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -501,7 +449,7 @@ fun MediaInspectorAndVaultSheet(
                         Spacer(modifier = Modifier.height(6.dp))
                         if (duplicateGroups.isEmpty()) {
                             Text(
-                                text = "No duplicate or redundant burst groups detected.",
+                                text = "No duplicates found.",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -515,16 +463,8 @@ fun MediaInspectorAndVaultSheet(
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(ElectricSlateTokens.BgCanvas)
-                                            .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                             .padding(10.dp)
                                     ) {
-                                        Text(
-                                            text = group.reason,
-                                            fontFamily = ElmsSans,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 12.sp,
-                                            color = ElectricSlateTokens.PrimaryAccent
-                                        )
                                         group.items.forEachIndexed { idx, dupItem ->
                                             Row(
                                                 modifier = Modifier
@@ -534,7 +474,7 @@ fun MediaInspectorAndVaultSheet(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
-                                                    text = "${if (idx == 0) "★ Keep: " else "Candidate: "}${dupItem.title} (${dupItem.formattedSize})",
+                                                    text = "${dupItem.title} (${dupItem.formattedSize})",
                                                     fontFamily = ElmsSans,
                                                     fontWeight = FontWeight.Medium,
                                                     fontSize = 12.sp,
@@ -543,7 +483,7 @@ fun MediaInspectorAndVaultSheet(
                                                 )
                                                 if (idx > 0) {
                                                     AppButton(
-                                                        text = "Trash",
+                                                        text = "Delete",
                                                         leadingIcon = Icons.Outlined.DeleteOutline,
                                                         onClick = { onMoveToTrash(dupItem) },
                                                         variant = AppButtonVariant.DESTRUCTIVE,
@@ -560,14 +500,13 @@ fun MediaInspectorAndVaultSheet(
                         }
                     }
 
-                    // 30-Day Recycle Bin (F-G12)
                     AppCard(
                         modifier = Modifier.fillMaxWidth(),
                         cornerRadius = 16.dp,
                         contentPadding = 12.dp
                     ) {
                         Text(
-                            text = "30-Day Recycle Bin (${trashedItems.size} Items)",
+                            text = "Trash (${trashedItems.size})",
                             fontFamily = ElmsSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -576,7 +515,7 @@ fun MediaInspectorAndVaultSheet(
                         Spacer(modifier = Modifier.height(6.dp))
                         if (trashedItems.isEmpty()) {
                             Text(
-                                text = "Recycle Bin is empty.",
+                                text = "Trash is empty.",
                                 fontFamily = ElmsSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -590,7 +529,6 @@ fun MediaInspectorAndVaultSheet(
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(ElectricSlateTokens.BgCanvas)
-                                            .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                             .padding(10.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
@@ -604,7 +542,7 @@ fun MediaInspectorAndVaultSheet(
                                                 color = ElectricSlateTokens.TextPrimary
                                             )
                                             Text(
-                                                text = "${tItem.qualityBadge} • ${tItem.formattedSize} • 30 days remaining",
+                                                text = tItem.formattedSize,
                                                 fontFamily = ElmsSans,
                                                 fontWeight = FontWeight.Normal,
                                                 fontSize = 11.sp,

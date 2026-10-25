@@ -65,13 +65,6 @@ fun AppCard(
             .clip(shape)
             .background(containerColor)
             .then(innerGlowModifier)
-            .border(
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = borderColor
-                ),
-                shape = shape
-            )
             .padding(contentPadding)
     ) {
         Column {

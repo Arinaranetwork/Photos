@@ -8,17 +8,14 @@ package com.arinara.photos.ui.player
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,10 +87,10 @@ fun AudioEqStudioSheet(
     AppBottomSheet(
         visible = visible,
         onDismiss = onDismiss,
-        title = "10-Band EQ & 60fps DSP Studio",
+        title = "Equalizer",
         isMinimized = isMinimized,
         onMinimizedChange = onMinimizedChange,
-        minimizedPillText = "EQ Active: ${dspState.activePresetName} (${String.format("%+.1fdB", dspState.preampDb)})"
+        minimizedPillText = "EQ: ${dspState.activePresetName}"
     ) {
         Column(
             modifier = Modifier
@@ -102,7 +98,6 @@ fun AudioEqStudioSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Top Master Toggle + Graphic vs Parametric Switcher
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -110,13 +105,13 @@ fun AudioEqStudioSheet(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AppPillChip(
-                        label = if (dspState.eqEnabled) "EQ Enabled" else "EQ Bypassed",
+                        label = if (dspState.eqEnabled) "On" else "Off",
                         leadingIcon = Icons.Outlined.Equalizer,
                         isSelected = dspState.eqEnabled,
                         onClick = { onToggleEqEnabled(!dspState.eqEnabled) }
                     )
                     AppPillChip(
-                        label = if (dspState.isParametricMode) "Parametric (PEQ)" else "10-Band Graphic",
+                        label = if (dspState.isParametricMode) "Parametric" else "10-Band",
                         leadingIcon = Icons.Outlined.Tune,
                         isSelected = dspState.isParametricMode,
                         onClick = { onToggleParametricMode(!dspState.isParametricMode) }
@@ -124,10 +119,10 @@ fun AudioEqStudioSheet(
                 }
 
                 AppButton(
-                    text = "Save Custom",
+                    text = "Save Preset",
                     leadingIcon = Icons.Outlined.Save,
                     onClick = {
-                        onSaveCustomPreset("User Custom $customSlotCounter")
+                        onSaveCustomPreset("Custom $customSlotCounter")
                         customSlotCounter = (customSlotCounter % 3) + 1
                     },
                     variant = AppButtonVariant.SECONDARY,
@@ -137,33 +132,12 @@ fun AudioEqStudioSheet(
                 )
             }
 
-            // 60fps Real-Time FFT Spectrum / Oscilloscope / 24kHz Lossless Spectrogram (F-E06)
+            // Visualizer Card
             AppCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 16.dp,
                 contentPadding = 12.dp
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "60fps Real-Time Analyzer",
-                        fontFamily = ElmsSans,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = ElectricSlateTokens.TextPrimary
-                    )
-                    Text(
-                        text = if (isLosslessTrack) "24kHz+ True Lossless" else "16kHz Lossy Shelf",
-                        fontFamily = ElmsSans,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 11.sp,
-                        color = ElectricSlateTokens.PrimaryAccent
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -184,10 +158,9 @@ fun AudioEqStudioSheet(
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(104.dp)
+                        .height(96.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(ElectricSlateTokens.BgCanvas)
-                        .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                         .padding(8.dp)
                 ) {
                     val w = size.width
@@ -241,76 +214,29 @@ fun AudioEqStudioSheet(
                             )
                         }
                         VisualizerMode.WATERFALL_SPECTROGRAM -> {
-                            // Draw 16kHz vs 24kHz Nyquist cutoff line + spectral density columns
-                            val cutoffX = w * 0.78f
                             val slotW = w / binCount
                             for (i in 0 until binCount) {
                                 val mag = spectrumBins[i].coerceIn(0.05f, 1.0f)
                                 val colH = h * mag
-                                val isUltraHighFreq = i >= 25
-                                val color = if (isUltraHighFreq && isLosslessTrack) {
-                                    ElectricSlateTokens.PrimaryAccent
-                                } else if (isUltraHighFreq) {
-                                    ElectricSlateTokens.Destructive.copy(alpha = 0.45f)
-                                } else {
-                                    ElectricSlateTokens.PrimaryAccent.copy(alpha = 0.75f)
-                                }
                                 drawRect(
-                                    color = color,
+                                    color = ElectricSlateTokens.PrimaryAccent.copy(alpha = 0.85f),
                                     topLeft = Offset(i * slotW, h - colH),
                                     size = Size(slotW * 0.82f, colH)
                                 )
                             }
-                            drawLine(
-                                color = ElectricSlateTokens.TextPrimary,
-                                start = Offset(cutoffX, 0f),
-                                end = Offset(cutoffX, h),
-                                strokeWidth = 1.dp.toPx()
-                            )
                         }
                     }
                 }
             }
 
-            // Per-Output Device Auto-Preset Switcher (F-E05)
+            // Output Profile & Presets
             AppCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 16.dp,
                 contentPadding = 12.dp
             ) {
                 Text(
-                    text = "Output Device Auto-Preset Binding",
-                    fontFamily = ElmsSans,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = ElectricSlateTokens.TextPrimary
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    AudioOutputDevice.entries.forEach { dev ->
-                        AppPillChip(
-                            label = dev.label,
-                            leadingIcon = Icons.Outlined.Headphones,
-                            isSelected = dspState.activeOutputDevice == dev,
-                            onClick = { onSwitchOutputDevice(dev) }
-                        )
-                    }
-                }
-            }
-
-            // Genre Presets & 1-Tap AutoEq Headphone Profiles (F-E02 & F-E03)
-            AppCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 16.dp,
-                contentPadding = 12.dp
-            ) {
-                Text(
-                    text = "Built-in Genre & Custom Presets",
+                    text = "Presets",
                     fontFamily = ElmsSans,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
@@ -332,56 +258,36 @@ fun AudioEqStudioSheet(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "1-Tap AutoEq / Wavelet Reference Headphone Targets",
-                    fontFamily = ElmsSans,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp,
-                    color = ElectricSlateTokens.TextMuted
-                )
-                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AUTOEQ_REFERENCE_PROFILES.forEach { (name, profileTxt) ->
+                    AudioOutputDevice.entries.forEach { dev ->
                         AppPillChip(
-                            label = "AutoEq: $name",
-                            isSelected = dspState.activePresetName.contains(name, ignoreCase = true),
-                            onClick = { onImportAutoEqProfile(name, profileTxt) }
+                            label = dev.label,
+                            leadingIcon = Icons.Outlined.Headphones,
+                            isSelected = dspState.activeOutputDevice == dev,
+                            onClick = { onSwitchOutputDevice(dev) }
                         )
                     }
                 }
             }
 
-            // 10-Band Frequency Curve + Band Editor (F-E01 & F-E02)
+            // 10-Band Frequency Curve + Band Editor
             AppCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 16.dp,
                 contentPadding = 12.dp
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Preamp Gain: ${String.format("%+.1f dB", dspState.preampDb)}",
-                        fontFamily = ElmsSans,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = ElectricSlateTokens.TextPrimary
-                    )
-                    Text(
-                        text = "Anti-Clipping Headroom Guard",
-                        fontFamily = ElmsSans,
-                        fontWeight = FontWeight.Normal,
-                        fontSize = 11.sp,
-                        color = ElectricSlateTokens.TextMuted
-                    )
-                }
+                Text(
+                    text = "Preamp: ${String.format("%+.1f dB", dspState.preampDb)}",
+                    fontFamily = ElmsSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = ElectricSlateTokens.TextPrimary
+                )
                 AppSlider(
                     value = dspState.preampDb,
                     onValueChange = onChangePreampDb,
@@ -389,7 +295,6 @@ fun AudioEqStudioSheet(
                     steps = 0
                 )
 
-                // Spline Frequency Curve Visualization across 10 Bands
                 val eqPath = remember { Path() }
                 Canvas(
                     modifier = Modifier
@@ -397,7 +302,6 @@ fun AudioEqStudioSheet(
                         .height(80.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(ElectricSlateTokens.BgCanvas)
-                        .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                         .padding(10.dp)
                 ) {
                     val w = size.width
@@ -432,7 +336,6 @@ fun AudioEqStudioSheet(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Band Selector Chips (31Hz .. 16kHz)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -455,7 +358,7 @@ fun AudioEqStudioSheet(
 
                 if (!dspState.isParametricMode) {
                     Text(
-                        text = "Band ${selectedBandIndex + 1} (${activeFreqHz} Hz): ${String.format("%+.1f dB", activeGain)}",
+                        text = "${activeFreqHz} Hz: ${String.format("%+.1f dB", activeGain)}",
                         fontFamily = ElmsSans,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp,
@@ -472,7 +375,7 @@ fun AudioEqStudioSheet(
                         DspState.defaultParametricBands().first()
                     }
                     Text(
-                        text = "PEQ Filter #${selectedBandIndex + 1} (${peq.filterType.label}): Fc ${peq.frequencyHz}Hz • Gain ${String.format("%+.1fdB", peq.gainDb)} • Q ${String.format("%.2f", peq.qFactor)}",
+                        text = "${peq.frequencyHz}Hz • ${String.format("%+.1fdB", peq.gainDb)} • Q ${String.format("%.2f", peq.qFactor)}",
                         fontFamily = ElmsSans,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp,
@@ -505,14 +408,14 @@ fun AudioEqStudioSheet(
                 }
             }
 
-            // Analog-Style Bass Boost, 3D Spatial Virtualizer & +15dB Loudness Enhancer (F-E04)
+            // Bass Boost, Virtualizer & Loudness
             AppCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 16.dp,
                 contentPadding = 12.dp
             ) {
                 Text(
-                    text = "Bass Boost (${dspState.bassBoostPercent}%) • 3D Spatializer (${dspState.virtualizerPercent}%)",
+                    text = "Bass Boost (${dspState.bassBoostPercent}%) • Spatial (${dspState.virtualizerPercent}%)",
                     fontFamily = ElmsSans,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
@@ -531,7 +434,7 @@ fun AudioEqStudioSheet(
                     steps = 0
                 )
                 Text(
-                    text = "Loudness Enhancer Preamp: +${String.format("%.1f dB", dspState.loudnessGainDb)} (Up to +15.0 dB)",
+                    text = "Loudness Boost: +${String.format("%.1f dB", dspState.loudnessGainDb)}",
                     fontFamily = ElmsSans,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
@@ -547,27 +450,3 @@ fun AudioEqStudioSheet(
         }
     }
 }
-
-private val AUTOEQ_REFERENCE_PROFILES = listOf(
-    "Harman Target" to """
-        Preamp: -3.2 dB
-        Filter 1: ON LSC Fc 105 Hz Gain 5.5 dB Q 0.71
-        Filter 2: ON PK Fc 220 Hz Gain -1.8 dB Q 1.40
-        Filter 3: ON PK Fc 3200 Hz Gain 3.4 dB Q 1.80
-        Filter 4: ON HSC Fc 10000 Hz Gain 2.5 dB Q 0.71
-    """.trimIndent(),
-    "Sennheiser HD650" to """
-        Preamp: -4.8 dB
-        Filter 1: ON LSC Fc 75 Hz Gain 5.2 dB Q 0.70
-        Filter 2: ON PK Fc 180 Hz Gain -2.1 dB Q 1.20
-        Filter 3: ON PK Fc 3100 Hz Gain 2.2 dB Q 2.10
-        Filter 4: ON HSC Fc 9500 Hz Gain 3.0 dB Q 0.70
-    """.trimIndent(),
-    "Sony WH-1000XM5" to """
-        Preamp: -3.5 dB
-        Filter 1: ON LSC Fc 120 Hz Gain -4.2 dB Q 0.80
-        Filter 2: ON PK Fc 450 Hz Gain 1.8 dB Q 1.50
-        Filter 3: ON PK Fc 2600 Hz Gain 3.8 dB Q 1.60
-        Filter 4: ON HSC Fc 8500 Hz Gain 2.0 dB Q 0.75
-    """.trimIndent()
-)

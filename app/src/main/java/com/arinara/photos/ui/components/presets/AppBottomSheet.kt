@@ -97,10 +97,6 @@ fun AppBottomSheet(
                         }
                         .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                         .background(containerColor)
-                        .border(
-                            border = BorderStroke(1.dp, ElectricSlateTokens.BorderSubtle),
-                            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-                        )
                         .navigationBarsPadding()
                         .pointerInput(Unit) {
                             detectVerticalDragGestures(
@@ -220,7 +216,6 @@ fun AppBottomSheet(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(ElectricSlateTokens.SurfaceElevated)
-                            .border(BorderStroke(1.dp, ElectricSlateTokens.PrimaryAccent), CircleShape)
                             .jigglePressClickable { onMinimizedChange?.invoke(false) }
                             .padding(horizontal = 18.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,

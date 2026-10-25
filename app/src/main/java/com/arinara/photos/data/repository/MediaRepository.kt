@@ -8,6 +8,7 @@ package com.arinara.photos.data.repository
 
 import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
 import com.arinara.photos.data.model.AlbumBucket
 import com.arinara.photos.data.model.MediaFilter
@@ -43,9 +44,7 @@ class MediaRepository(private val context: Context?) {
         val loaded = mutableListOf<MediaItem>()
         val ctx = context
         if (ctx != null) {
-            val samples = SampleMediaGenerator.ensureSampleLibrary(ctx)
-            loaded.addAll(samples)
-            loaded.addAll(scanStudioExportsDir(ctx))
+            SampleMediaGenerator.purgeLegacySamples(ctx)
             loaded.addAll(queryDeviceMediaStore(ctx))
         }
         val deduplicated = loaded
@@ -208,49 +207,6 @@ class MediaRepository(private val context: Context?) {
         )
     }
 
-    private fun scanStudioExportsDir(ctx: Context): List<MediaItem> {
-        val exportDir = File(ctx.filesDir, "studio_exports")
-        if (!exportDir.exists()) return emptyList()
-        val files = exportDir.listFiles()?.toList().orEmpty()
-        return files.mapNotNull { file ->
-            if (!file.isFile) return@mapNotNull null
-            val ext = file.extension.uppercase().ifEmpty { "WAV" }
-            val mediaType = MediaItem.classifyExtension(ext)
-            val isLossless = ext in setOf("WAV", "FLAC", "ALAC", "PNG", "DNG")
-            val badge = MediaItem.computeQualityBadge(
-                mediaType = mediaType,
-                extension = ext,
-                width = if (mediaType == MediaType.PHOTO) 1920 else 0,
-                height = if (mediaType == MediaType.PHOTO) 1080 else 0,
-                fps = 30f,
-                bitDepth = if (isLossless) 24 else 16,
-                sampleRateHz = if (isLossless) 48000 else 44100,
-                bitrateKbps = if (isLossless) 1411 else 320
-            )
-            MediaItem(
-                id = "export_${file.name}",
-                title = file.nameWithoutExtension,
-                artist = "Photos Studio Export",
-                album = "Studio Exports",
-                uriString = file.toURI().toString(),
-                filePath = file.absolutePath,
-                mimeType = when (mediaType) {
-                    MediaType.AUDIO -> "audio/wav"
-                    MediaType.VIDEO -> "video/mp4"
-                    else -> "image/png"
-                },
-                extension = ext,
-                mediaType = mediaType,
-                sizeBytes = file.length(),
-                dateAddedEpochSec = file.lastModified() / 1000L,
-                durationMs = 10_000L,
-                qualityBadge = badge,
-                isLossless = isLossless,
-                isStudioExport = true
-            )
-        }
-    }
-
     private fun queryDeviceMediaStore(ctx: Context): List<MediaItem> {
         val results = mutableListOf<MediaItem>()
         try {
@@ -275,11 +231,11 @@ class MediaRepository(private val context: Context?) {
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 var count = 0
-                while (cursor.moveToNext() && count < 150) {
+                while (cursor.moveToNext() && count < 2000) {
                     count++
                     val id = cursor.getLong(0)
                     val name = cursor.getString(1) ?: "Image_$id"
-                    val bucket = cursor.getString(2) ?: "Camera Roll"
+                    val bucket = cursor.getString(2) ?: "Camera"
                     val path = cursor.getString(3) ?: ""
                     val mime = cursor.getString(4) ?: "image/jpeg"
                     val size = cursor.getLong(5)
@@ -332,7 +288,7 @@ class MediaRepository(private val context: Context?) {
                 "${MediaStore.Video.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 var count = 0
-                while (cursor.moveToNext() && count < 100) {
+                while (cursor.moveToNext() && count < 1000) {
                     count++
                     val id = cursor.getLong(0)
                     val name = cursor.getString(1) ?: "Video_$id"
@@ -384,7 +340,8 @@ class MediaRepository(private val context: Context?) {
                 MediaStore.Audio.Media.MIME_TYPE,
                 MediaStore.Audio.Media.SIZE,
                 MediaStore.Audio.Media.DATE_ADDED,
-                MediaStore.Audio.Media.DURATION
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.ALBUM_ID
             )
             resolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -394,21 +351,29 @@ class MediaRepository(private val context: Context?) {
                 "${MediaStore.Audio.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 var count = 0
-                while (cursor.moveToNext() && count < 150) {
+                while (cursor.moveToNext() && count < 2000) {
                     count++
                     val id = cursor.getLong(0)
-                    val title = cursor.getString(1) ?: "Audio_$id"
-                    val artist = cursor.getString(2) ?: "Unknown Artist"
-                    val album = cursor.getString(3) ?: "Music"
+                    val title = cursor.getString(1) ?: "Track $id"
+                    val rawArtist = cursor.getString(2) ?: ""
+                    val artist = if (rawArtist == "<unknown>" || rawArtist.isBlank()) "Unknown Artist" else rawArtist
+                    val rawAlbum = cursor.getString(3) ?: ""
+                    val album = if (rawAlbum == "<unknown>" || rawAlbum.isBlank()) "Music" else rawAlbum
                     val path = cursor.getString(4) ?: ""
                     val mime = cursor.getString(5) ?: "audio/mpeg"
                     val size = cursor.getLong(6)
                     val dateSec = cursor.getLong(7)
                     val durationMs = cursor.getLong(8)
+                    val albumId = cursor.getLong(9)
                     val ext = path.substringAfterLast('.', "MP3").uppercase()
                     val isLossless = ext in setOf("FLAC", "WAV", "ALAC", "AIFF", "WV", "APE")
                     val bitrate = if (durationMs > 0L) ((size * 8L) / durationMs).toInt().coerceIn(64, 9216) else 320
                     val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                    val albumArtUri = if (albumId > 0L) {
+                        ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), albumId).toString()
+                    } else {
+                        null
+                    }
                     results.add(
                         MediaItem(
                             id = "ms_aud_$id",
@@ -438,7 +403,8 @@ class MediaRepository(private val context: Context?) {
                                 bitrate
                             ),
                             isLossless = isLossless,
-                            isHiRes = isLossless && bitrate > 2000
+                            isHiRes = isLossless && bitrate > 2000,
+                            albumArtUriString = albumArtUri
                         )
                     )
                 }

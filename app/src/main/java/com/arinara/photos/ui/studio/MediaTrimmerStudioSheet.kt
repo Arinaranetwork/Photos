@@ -112,7 +112,7 @@ fun MediaTrimmerStudioSheet(
     AppBottomSheet(
         visible = visible,
         onDismiss = onDismiss,
-        title = "Non-Destructive Cutter & Quality Studio"
+        title = "Audio & Batch Tools"
     ) {
         Column(
             modifier = Modifier
@@ -197,11 +197,6 @@ fun MediaTrimmerStudioSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (isSel) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                        .border(
-                                            1.dp,
-                                            if (isSel) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                            RoundedCornerShape(12.dp)
-                                        )
                                         .jigglePressClickable { cutMode = mode }
                                         .padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -380,11 +375,6 @@ fun MediaTrimmerStudioSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (isSel) ElectricSlateTokens.SurfaceElevated else ElectricSlateTokens.BgCanvas)
-                                        .border(
-                                            1.dp,
-                                            if (isSel) ElectricSlateTokens.PrimaryAccent else ElectricSlateTokens.BorderSubtle,
-                                            RoundedCornerShape(12.dp)
-                                        )
                                         .jigglePressClickable { selectedQualityTier = tier }
                                         .padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -561,7 +551,6 @@ fun MediaTrimmerStudioSheet(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(ElectricSlateTokens.BgCanvas)
-                                .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp))
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             BasicTextField(

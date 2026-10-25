@@ -69,7 +69,6 @@ fun AppPillChip(
             .height(36.dp)
             .clip(CircleShape)
             .background(containerColor)
-            .border(BorderStroke(1.dp, borderColor), CircleShape)
             .jigglePressClickable(
                 enabled = enabled,
                 onClick = onClick

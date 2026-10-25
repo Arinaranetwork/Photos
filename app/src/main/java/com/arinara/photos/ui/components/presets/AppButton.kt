@@ -96,11 +96,6 @@ fun AppButton(
             .height(height)
             .clip(shape)
             .background(containerColor)
-            .then(
-                if (variant == AppButtonVariant.OUTLINED || variant == AppButtonVariant.SECONDARY) {
-                    Modifier.border(BorderStroke(1.dp, borderColor), shape)
-                } else Modifier
-            )
             .jigglePressClickable(
                 enabled = enabled,
                 onClick = onClick

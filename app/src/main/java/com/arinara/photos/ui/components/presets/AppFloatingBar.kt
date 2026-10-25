@@ -100,7 +100,6 @@ fun AppFloatingBar(
                         }
                         .clip(CircleShape)
                         .background(containerColor)
-                        .border(BorderStroke(1.dp, borderColor), CircleShape)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {

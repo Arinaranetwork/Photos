@@ -78,8 +78,7 @@ fun AppListItem(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(leadingBoxBackground)
-                        .border(1.dp, ElectricSlateTokens.BorderSubtle, RoundedCornerShape(12.dp)),
+                        .background(leadingBoxBackground),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(

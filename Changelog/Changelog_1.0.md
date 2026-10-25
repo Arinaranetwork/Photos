@@ -23,19 +23,24 @@ Banner: /Assets/Banners/PhotosBanner_1.0_2026-10-25.png
 - **Lossless Signal Path Inspector & Output Switcher**: `ConnectedInspector` popup displaying `Source -> Decoder -> DSP -> Output Device` plus `Bit-Perfect Direct PCM`, `32-Bit Float Hi-Res DSP`, and `Voice Clarity Mono` modes.
 - **Pitch/Tempo, Skip Silence, LRC Lyrics, CUE Splitter & Tag Editor**: Independent speed (`0.25x..4.0x`) & pitch (`-12..+12` semitones + `432Hz`), Smart Skip Silence with "Time Saved" counter, synced `.LRC` lyrics with tap-line-to-seek, `.CUE` virtual chapter splitting, timestamp bookmarks, and ID3/FLAC tag editing.
 
-### 10-Band EQ, Parametric DSP & 60fps Spectrogram Studio (Phase 4)
+### 10-Band EQ, Parametric DSP & 60fps Spectrogram (Phase 4)
 - **10-Band Graphic Equalizer & Parametric EQ (PEQ)**: 10 bands (`31Hz`–`16kHz`, `-15dB..+15dB`) with Preamp headroom control, Parametric filter mode (`Hz`, `dB`, `Q`), and 1-tap Wavelet/AutoEq reference headphone target importer (`Harman Target`, `Sennheiser HD650`, `Sony WH-1000XM5`).
 - **Bass Boost, 3D Virtualizer, +15dB Loudness Enhancer & Per-Device Auto-Presets**: Automatic preset switching across `Phone Speaker`, `Wired Headphones / USB DAC`, `Bluetooth Audio`, and `Line-Out / Cast`.
-- **60fps Real-Time Spectrum & 24kHz Fake-Lossless Waterfall Analyzer**: 4 live visualizer modes (`32-Band FFT`, `Spline Wave`, `Oscilloscope`, `24kHz Lossless Check`) inside a Minimize-to-Pill `AppBottomSheet`.
+- **60fps Real-Time Spectrum & 24kHz Lossless Waterfall Analyzer**: 4 live visualizer modes (`32-Band FFT`, `Spline Wave`, `Oscilloscope`, `24kHz Lossless Check`) inside a Minimize-to-Pill `AppBottomSheet`.
 
 ### Comfy Netflix-Style Video Theater (Phase 5)
 - **Continue Watching Shelf & Episodic Series Engine**: Automatic season/episode grouping (`S01E01`) with resume progress bars, remaining time labels, and **Auto-Play Next Episode** handoff.
 - **Bedtime Touch Lock, Hold-for-2x Speed & +85s Skip Intro**: Single-tap screen lock for comfortable viewing in bed, long-press anywhere for instant `2.0x` speed, and floating `+85s Skip Intro` button with per-folder auto-skip rules.
 - **Sub-Zero Extra-Dim (-80%) & 200% Volume Preamp Gestures**: Dual-zone vertical swipe HUD for night-safe dimming and software volume boost.
 - **Dual Subtitles & Clickable Subtitle Transcript Search**: Simultaneous primary + secondary language subtitles (`EN` + `JP`), `+/-50ms` subtitle/audio sync offset, and searchable transcript drawer where tapping any dialogue line seeks directly to that scene.
-- **Cinema Optics, PiP, Background Audio Handoff & 4x4 Storyboard Export**: 800% video zoom, `-1f`/`+1f` frame stepping, horizontal mirror flip (for dance/guitar practice), Picture-in-Picture, 1-tap background audio handoff, and `4x4` contact sheet PNG export.
+- **Cinema Optics, PiP, Background Audio Handoff & 4x4 Storyboard Export**: 800% video zoom, `-1f`/`+1f` frame stepping, horizontal mirror flip, Picture-in-Picture, 1-tap background audio handoff, and `4x4` contact sheet PNG export.
 
-### Non-Destructive Trimmer, Multi-Quality Audio Extractor, Deep EXIF & PIN Vault (Phases 6–7)
-- **Lossless Fast-Cut Trimmer & Multi-Segment Splitter**: `Trim Outside`, `Cut Middle (Splice Ends)`, and `Multi-Segment Split` (`2..8` parts) without ever modifying the original source file.
-- **1-Tap Video-to-Audio Extractor & Multi-Quality Converter**: Export audio in `Hi-Res Lossless (24-bit/96kHz)`, `CD Lossless (16-bit/44.1kHz)`, `320kbps`, `192kbps`, or `96kbps` with Fade-In/Out envelopes and Ringtone mode (`<=30s`).
+### Deep EXIF, Duplicates & PIN Vault (Phases 6–7)
 - **Live 256-Bin RGB Histogram, 6-Swatch Palette, 1-Tap EXIF Privacy Scrubber & PIN Vault**: Real-time RGB + Luminance histogram, `SHA-256` file digest, 1-tap GPS/serial EXIF scrubber, batch image converter & token renamer (`{date}_{album}_{counter}`), salted `SHA-256` PIN Private Vault (with Decoy PIN), and 30-day Recycle Bin + Duplicate/Burst Finder.
+
+## Patches
+
+### 1.0.1 (2026-10-25)
+- **100% Real Device Media & Automatic Permissions**: Removed all pre-generated sample media, purged legacy sample folders (`studio_samples`, `studio_exports`) on launch, removed the manual `"Scan Device"` button, and added automatic `MediaStore` permission request and `ON_RESUME` device library refresh.
+- **Real Hardware Video, Audio & Photo Rendering**: Bound `VideoTheaterSheet` to a real `androidx.media3.ui.PlayerView` + `ExoPlayer` surface, wired real `ExoPlayer` audio playback with hardware `Equalizer`/`BassBoost`/`LoudnessEnhancer` and `MediaStore` album art, and wired `PhotoCompareAndLoupeSheet` to decode real device photo bitmaps.
+- **Borderless Clean UI & Concise Labels**: Removed all 1dp card/chip/sheet/button/floating-bar outlines across the entire app, removed the `"Cut"` bottom navigation tab, removed all `"Studio"` strings, and replaced verbose technical descriptions with clean, concise labels.
