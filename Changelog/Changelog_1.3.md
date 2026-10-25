@@ -23,3 +23,12 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 
 ## Changed
 - **Decluttered Functional UI**: Removed `"System Auto"` brightness chip and stripped verbose/promotional descriptions across audio, equalizer, and video controls.
+
+## Patches
+
+### 1.3.1 (2026-10-25)
+- **Standalone Full-Screen Video Editor (`VideoEditorSheet`)**: Promoted the video editor out of the video player drawer into a dedicated full-screen editor (`Cut`, `Transform`, `Color`, `Audio & Speed`) with real-time `ColorMatrix` preview, 6 Color Presets (`Original`, `Vivid`, `Teal & Orange`, `Warm Vintage`, `Noir B&W`, `Cyberpunk`), interactive pinch/drag canvas transforms, automatic trimmed-range loop preview, and pixel-rendered `.MP4` export.
+- **Moved Brightness to Video Editor**: Removed the screen brightness override system from the video player so brightness adjustment lives exclusively inside the standalone Video Editor.
+- **Video Playback Loop & Counted Repeat Modes**: Added full loop mode support (`Off`, `1x`, `2x`, `3x`, `5x`, `∞`, `All`, `A–B`) to the video player so `Off` pauses and rewinds to `00:00` at the end of a video, counted repeats loop the exact number of times before resetting to `00:00`, and timeline scrubbing displays a live frame preview thumbnail.
+- **Equalizer & Real-Time PCM DSP Overhaul**: Upgraded `RealTimePcmDspAudioProcessor` to process `16-bit`, `24-bit`, `32-bit`, and `Float` PCM streams, wired `Bass Boost` and `Virtualizer` directly into the PCM biquad/M-S pipeline, added real-time post-DSP 256-point Radix-2 FFT spectrum & waveform capture, preserved parametric filter types when dragging on the response curve, and restored live numeric readouts on all EQ/DSP controls.
+- **Fixed Audio End-of-Track Race Condition**: Removed premature position-tick `onTrackEnded()` triggering so `Player.STATE_ENDED` cleanly rewinds and pauses at `00:00` (`Off`) or executes counted repeats (`1x`, `2x`, `3x`, `5x`) without race conditions.
