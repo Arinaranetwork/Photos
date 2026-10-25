@@ -25,3 +25,12 @@ Banner: /Assets/Banners/PhotosBanner_1.2_2026-10-25.png
 
 ### Universal Android `"Share to..."` Integration (`MediaShareHelper` & `file_paths.xml`)
 - **1-Tap Native Android Share Sheet Everywhere**: Added `"Share to..."` across the Full-Screen Photo Viewer, Video Player header & transport bar, Music Player header, and Video/Audio Converter (`"Convert & Share..."` with optional temporary cache cleanup so temporary conversions take `0 MB` permanent storage).
+
+## Patches
+
+### 1.2.1 (2026-10-25)
+- **Real ISO/IEC 11172-3 LAME MP3 Encoding & Scoped Storage Descriptor Support (`A-001`)**: Replaced the MP3 stream writer with `de.sciss:jump3r:1.0.5` (LAME 3.98.4 `Lame.lame_encode_buffer_int` + `lame_encode_flush` + `ID3v2` header), added `ContentResolver.openFileDescriptor` (`ParcelFileDescriptor`) support for `content://` video URIs, and fixed the `MediaCodec` audio decoder loop to wait for `BUFFER_FLAG_END_OF_STREAM`.
+- **Persistent System Picture-in-Picture (PiP) & Unified Video Surface (`A-002`)**: Added `onUserLeaveHint()` and `PictureInPictureParams.Builder().setAutoEnterEnabled(true)` (API 31+) in `MainActivity`, wired the PiP button directly to `enterPictureInPictureMode`, and unified `VideoTheaterSheet` around a single persistent `PlayerView` (`AndroidView`) so the video surface never vanishes when minimizing or closing the app. Active PiP controls are strictly limited to the 3 core buttons (**Go Left**, **Play/Pause**, **Go Right**).
+- **Source-Bound Resolution & Frame Rate Filtering (`A-003`)**: Added `availableResolutionPresetsForSource` and `availableFpsPresetsForSource` so resolution and FPS options higher than the original video's native resolution or frame rate are never displayed.
+- **Decluttered UI Labels & Removed `0%` / Verbose Descriptions (`A-004`)**: Removed `0%` readouts, numeric suffixes on parameter chips, and verbose explanatory text across `VideoTheaterSheet`, `PhotoEditorSheet`, `AudioEqStudioSheet`, and `AudiophilePlayerSheet`.
+- **Renamed Repository to `Arinaranetwork/Photos` (`A-005`)**: Renamed the GitHub repository to uppercase `Photos` and updated remote URLs and release metadata.

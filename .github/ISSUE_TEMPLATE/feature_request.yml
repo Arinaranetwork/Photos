@@ -1,0 +1,51 @@
+# --- Arinara Network (c) 2026 ---
+# Exclusive property of Arinara Network.
+# Unauthorized use, reproduction, distribution, or modification of this code,
+# in whole or in part, for any purpose, is strictly prohibited without prior
+# written consent from Arinara Network as sole legal owner of this codebase.
+
+name: "💡 Feature Request"
+description: "Suggest a new capability, format support, audio DSP enhancement, or UX improvement for Photos."
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make **Photos** even better? Share your proposal below!
+  - type: dropdown
+    id: category
+    attributes:
+      label: "Feature Category"
+      options:
+        - "Photo Gallery & Compare Viewer"
+        - "Pro Photo Darkroom Editor"
+        - "Cinema Video Theater & PiP"
+        - "Video/Audio Converter & Lossless Trimmer"
+        - "Audiophile Music Player & .LRC Lyrics"
+        - "10-Band Equalizer & Audio DSP"
+        - "EXIF Privacy & PIN Vault"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: "Feature Description"
+      description: "Clearly describe the feature or improvement you would like to see."
+      placeholder: "I would love to be able to..."
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: "Use Case & Benefit"
+      description: "Why is this helpful, and what workflow does it improve?"
+      placeholder: "When managing lossless albums / editing RAW photos..."
+    validations:
+      required: true
+  - type: textarea
+    id: mockups
+    attributes:
+      label: "Examples or Reference Mockups (Optional)"
+      description: "Attach any sketches, screenshots, or reference workflows."

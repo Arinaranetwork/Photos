@@ -1,0 +1,14 @@
+# --- Arinara Network (c) 2026 ---
+# Exclusive property of Arinara Network.
+# Unauthorized use, reproduction, distribution, or modification of this code,
+# in whole or in part, for any purpose, is strictly prohibited without prior
+# written consent from Arinara Network as sole legal owner of this codebase.
+
+blank_issues_enabled: true
+contact_links:
+  - name: "📦 Latest APK Downloads & Releases"
+    url: "https://github.com/Arinaranetwork/Photos/releases"
+    about: "Download the latest verified Stable and Beta Android APKs before reporting an issue."
+  - name: "📋 Issue Reporting Guide"
+    url: "https://github.com/Arinaranetwork/Photos/issues/1"
+    about: "Read our quick guide on how to report bugs and submit feedback."

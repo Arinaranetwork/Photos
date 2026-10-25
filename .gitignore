@@ -17,16 +17,31 @@ app/build
 .externalNativeBuild
 .cxx
 
+# Source code & internal build configuration (Public repo tracks only builds & description)
+/app/
+/gradle/
+build.gradle.kts
+settings.gradle.kts
+gradle.properties
+gradlew
+gradlew.bat
+
+# Internal documentation & agent configuration
+/.agents/
+/Docs/
+Rules.md
+Android.md
+.env.Example
+
 # Intermediate build outputs (Never ignore /Output/Release)
 /Output/Build/
 /Output/Logs/
 /Output/Reports/
 /Output/Exports/
 
-# Secrets & Environment (committed .env.Example is not ignored)
+# Secrets & Environment
 .env
 .env.*
-!.env.Example
 *.keystore
 *.jks
 *.idsig
