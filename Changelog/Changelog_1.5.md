@@ -28,3 +28,11 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 - **Music Page `Arrange Order` Mode & Queue Sync (`HomeScreen`, `MultiQueueManager`)**: Fixed tapping a song row while in `Arrange Order` mode so it never triggers playback or opens the player sheet, added `#1, #2...` rank badges, `Move to Bottom`, and quick sort presets (`Reverse`, `Title A–Z`, `Artist`, `Duration`, `Newest`, `Reset`), and synchronized arrangement order live with `MultiQueueManager` and persistent storage.
 - **GitHub Release In-App Update Popup (`AppUpdateChecker`, `HomeScreen`)**: Replaced the recursive regex in `AppUpdateChecker` that caused `StackOverflowError` on large GitHub release bodies with a linear `O(N)` JSON string scanner + non-rate-limited GitHub Atom/HTML fallbacks, and added automatic check triggers on app launch and `ON_RESUME`.
 - **Synced Lyrics Progressive Bottom Bokeh & Lazy Rendering (`AudiophilePlayerSheet`)**: Restored progressive optical blur across the bottom of the lyrics viewport while keeping 60fps sweep isolated to the active line so lyrics never recompose all at once.
+
+## Patches
+
+### 1.5.1 — 2026-10-26
+- **Package Installer Update Installation Fix (`AndroidManifest.xml`, `app/build.gradle.kts`, `AppUpdateInstaller.kt`, `AppUpdateDialog.kt`, `HomeScreen.kt`)**:
+  - Added `REQUEST_INSTALL_PACKAGES` permission, enabled both `v1` (JAR) and `v2` APK Signature Schemes with the unified keystore certificate (`versionCode = 151`), and enabled `jniLibs.useLegacyPackaging = true` (`android:extractNativeLibs="true"`) so native libraries extract cleanly across all `4 KB` and `16 KB` page-size Android devices.
+  - Built in-app `AppUpdateInstaller` that downloads the release `.apk` directly on `Dispatchers.IO` with a live `0%–100%` progress bar, verifies the `PK\x03\x04` ZIP/APK header and `PackageManager.getPackageArchiveInfo` integrity, handles `canRequestPackageInstalls()` (`ACTION_MANAGE_UNKNOWN_APP_SOURCES`), and launches the system Package Installer via `FileProvider` (`application/vnd.android.package-archive` + explicit `grantUriPermission`).
+  - Updated `README.md` APK table links to direct GitHub Releases binary download URLs instead of HTML blob paths.
