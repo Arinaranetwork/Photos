@@ -21,3 +21,9 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 - **Real-Time OpenGL ES 2.0 Video Color Grading in Live Preview & Export (`GlVideoPreviewTextureView`, `HardwareGlVideoRenderPipeline.kt`, `VideoEditorSheet.kt`)**:
   - Replaced the broken `PlayerView` + `Modifier.graphicsLayer` color preview in `VideoEditorSheet` with `GlVideoPreviewTextureView`—a dedicated OpenGL ES 2.0 `TextureView` + `EGL14` + `GLES20` OES fragment shader renderer sharing `VERTEX_SHADER`, `FRAGMENT_SHADER_OES`, `computeOrthographicVideoMvpMatrix`, and `computeColorGradeUniforms` with `HardwareGlVideoRenderPipeline`.
   - All 8 color grading parameters (`Brightness`, `Contrast`, `Saturation`, `Warmth`, `Tint`, `Highlights`, `Shadows`, `Vignette`) and all 6 built-in presets (`Original`, `Vivid`, `Teal & Orange`, `Warm Vintage`, `Noir B&W`, `Cyberpunk`) + custom presets now update the live video preview immediately at 60/120fps whether playback is playing or paused, and bake into exported videos with resilient hardware encoder/decoder fallback.
+
+## Patches
+### 1.6.1 (2026-10-27)
+- **Progressive Cross-API 3-Pass Gaussian Lyric Blur (`AudiophilePlayerSheet.kt`, `MultiQueueManager.kt`)**:
+  - Replaced `color.copy(alpha = 0f)` shadow fallback (which zeroed `TextPaint` alpha on Android 10/11) and nested `RenderEffect` (`TileMode.Decal`) offscreen washout with a zero-padded 3-pass separable Gaussian bitmap blur engine (`MultiQueueManager.gaussianBlurSingleColorArgb` + `ProgressiveBlurredLyricItem`).
+  - Added `padPx = 3 * r + 6` zero-alpha margins, zero-padded sliding-window bounds, gentle `1.0f..1.25f` optical energy compensation, pre-warmed `tier = 1` `420ms` active/inactive crossfade, and staggered `Dispatchers.Default` updates across tiers `1..6` (`downsample = 1` for tiers `1..2`, `downsample = 2` for tiers `3..6`) so inactive lyrics never vanish, never clip into white rectangular boxes, and never render all at once.
