@@ -20,7 +20,7 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 
 <br />
 
-<img src="Assets/Banners/PhotosBanner_1.5_2026-10-26.svg" alt="Photos 1.5 Banner" width="100%" />
+<img src="Assets/Banners/PhotosBanner_1.6_2026-10-27.svg" alt="Photos 1.6 Banner" width="100%" />
 
 <p align="center">
   <i>Built on the borderless Arinara Electric Slate design system (#0D1117 canvas, #161C26 surfaces, #7A5AF8 electric violet) with universal spring physics and zero cloud telemetry.</i>
@@ -103,7 +103,8 @@ All official compiled Android packages (`APK`) and their `SHA-256` verification 
 
 | Version | Channel | Release Artifact | Highlights |
 |:---|:---|:---|:---|
-| **`v1.5.1`** *(Latest)* | **Stable / Beta** | [`Photos_1.5.1_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.1/Photos_1.5.1_Android.apk)<br/>[`Photos_1.5.1_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.1/Photos_1.5.1_Beta_Android.apk) | Hotfix for Android Package Installer update installation (`REQUEST_INSTALL_PACKAGES`, `v1`+`v2` APK signature schemes, `extractNativeLibs="true"` for 4KB/16KB devices, in-app `AppUpdateInstaller` downloader with live `0%–100%` progress & `FileProvider` `application/vnd.android.package-archive` Package Installer handoff), plus all `v1.5.0` Storage & Media Management, 21-Format Converter & Flagship features |
+| **`v1.6.0`** *(Latest)* | **Stable / Beta** | [`Photos_1.6.0_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.6.0/Photos_1.6.0_Android.apk)<br/>[`Photos_1.6.0_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.6.0/Photos_1.6.0_Beta_Android.apk) | Unified Visual Tool Media Picker (`ToolMediaPickerSheet.kt` with album/folder filter chips, search, sort, numbered selection order badges, bottom selected tray, and in-tool visual thumbnail strips/cards across `Collage`, `Convert Images`, `Convert Video`, `Convert Audio`, `GIF`, `Scan`, `PDF`, `Combine Audio`, and `Edit Video` without random auto-selection), Per-Image & Rotate-All Rotation + Custom Background Color (`#RRGGBB` Hex & `R`/`G`/`B` sliders) across PDF & Image tools, plus Real-Time OpenGL ES 2.0 Video Color Grading (`GlVideoPreviewTextureView` + `HardwareGlVideoRenderPipeline` with working `Brightness`, `Contrast`, `Saturation`, `Warmth`, `Tint`, `Highlights`, `Shadows`, `Vignette`, and 6 built-in presets in both live preview and hardware export) |
+| **`v1.5.1`** | **Stable / Beta** | [`Photos_1.5.1_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.1/Photos_1.5.1_Android.apk)<br/>[`Photos_1.5.1_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.1/Photos_1.5.1_Beta_Android.apk) | Hotfix for Android Package Installer update installation (`REQUEST_INSTALL_PACKAGES`, `v1`+`v2` APK signature schemes, `extractNativeLibs="true"` for 4KB/16KB devices, in-app `AppUpdateInstaller` downloader with live `0%–100%` progress & `FileProvider` `application/vnd.android.package-archive` Package Installer handoff), plus all `v1.5.0` Storage & Media Management, 21-Format Converter & Flagship features |
 | **`v1.5.0`** | **Stable / Beta** | [`Photos_1.5.0_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.0/Photos_1.5.0_Android.apk)<br/>[`Photos_1.5.0_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.0/Photos_1.5.0_Beta_Android.apk) | Storage & Media Management Suite (`Free Up Space` dashboard, Universal Delete with both `Move to Trash` & `Delete Permanently`, `Delete Folder`, 3-Tier Smart Duplicate Detector & 1-Tap `Clean Duplicates`, Single-Res Image Compression with `Replace Originals`), 21-Format Media Conversion (`9` Image formats including `BMP`/`ICO`/`TIFF`/`GIF`/`TGA`, `13` Audio presets across `MP3`/`FLAC`/`M4A`/`AAC`/`OGG`/`WAV`/`AIFF`, `5` Video codecs/containers), Zero-Stretch Orthographic Video Rotation, `120Hz`/`144Hz` Flagship Device Engine, 4th `Tools` Bento Tab, Music Page `Arrange Order` Sync, GitHub Release Update Popup Fix |
 | **`v1.4.0`** | **Stable / Beta** | [`Photos_1.4.0_Android.apk`](Output/Release/Photos_1.4.0_Android.apk)<br/>[`Photos_1.4.0_Beta_Android.apk`](Output/Release/Photos_1.4.0_Beta_Android.apk) | On-Device PDF Studio (`Images ↔ PDF`, `Merge`, `Split/Rotate/Delete`, `Compress`, `Sign & Watermark`, Native PDF Reader), Batch Image Converter/Compressor, Long Screenshot Stitcher & Collage, 4-Corner Document Scanner, Offline QR Code Generator, Pure-Kotlin Animated `GIF89a` Maker, Audio+Cover → `.MP4` Video Synth, 5x–15x Faster Hardware OpenGL ES 2.0 Video Render + Single-Flight Lock + Stop Render + Quality Tab, Persistent Loop Modes & Custom Presets, Audio Player `3 Dots` Power Actions Menu & Song Cover Art Editor (`ID3v2.3 APIC`), Apple Music Progressive Depth-of-Field Blur & Vocal Sweep |
 | **`v1.3.3`** | **Stable / Beta** | [`Photos_1.3.3_Android.apk`](Output/Release/Photos_1.3.3_Android.apk)<br/>[`Photos_1.3.3_Beta_Android.apk`](Output/Release/Photos_1.3.3_Beta_Android.apk) | Hotfix for Audio Playback Force Close (`MediaSession` main-looper `Handler` on `Dispatchers.IO`, `Bitmap.Config.HARDWARE` to `ARGB_8888` conversion in `AudioArtworkExtractor`, clean foreground `Service` lifecycle), plus all `v1.3.2` Audiophile DSP, Apple Music Player & Audio Combiner features |
@@ -116,27 +117,27 @@ All official compiled Android packages (`APK`) and their `SHA-256` verification 
 | **`v1.1.1`** | **Beta / Stable** | [`Photos_1.1.1_Beta_Android.apk`](Output/Release/Photos_1.1.1_Beta_Android.apk)<br/>[`Photos_1.1.1_Android.apk`](Output/Release/Photos_1.1.1_Android.apk) | Updated dual-mountain emblem launcher icon across all adaptive and legacy densities |
 | **`v1.1.0`** | **Beta / Stable** | [`Photos_1.1.0_Beta_Android.apk`](Output/Release/Photos_1.1.0_Beta_Android.apk)<br/>[`Photos_1.1.0_Android.apk`](Output/Release/Photos_1.1.0_Android.apk) | Gesture image swiping (`Prev`/`Next` & swipe-to-dismiss) and 10-module / 70+ parameter Pro Photo Editor |
 
-Full release notes are available in [`Changelog/Changelog_1.5.md`](Changelog/Changelog_1.5.md), [`Changelog/Changelog_1.4.md`](Changelog/Changelog_1.4.md), [`Changelog/Changelog_1.3.md`](Changelog/Changelog_1.3.md), [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
+Full release notes are available in [`Changelog/Changelog_1.6.md`](Changelog/Changelog_1.6.md), [`Changelog/Changelog_1.5.md`](Changelog/Changelog_1.5.md), [`Changelog/Changelog_1.4.md`](Changelog/Changelog_1.4.md), [`Changelog/Changelog_1.3.md`](Changelog/Changelog_1.3.md), [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
 
 ---
 
 ## Installation & Verification
 
 ### 1. Direct Installation on Android
-1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or download [**`Photos_1.5.1_Android.apk`**](https://github.com/Arinaranetwork/Photos/releases/download/v1.5.1/Photos_1.5.1_Android.apk) directly.
+1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or download [**`Photos_1.6.0_Android.apk`**](https://github.com/Arinaranetwork/Photos/releases/download/v1.6.0/Photos_1.6.0_Android.apk) directly.
 2. Open the downloaded `.apk` file on your Android device (requires **Android 7.0 Nougat / API 24** or newer).
 3. If prompted by Android, allow installation from your browser or file manager.
 4. Launch **Photos** and grant local media permissions (`Photos & Videos` and `Music & Audio`) to index your on-device library immediately.
 
 ### 2. Optional ADB Installation
 ```powershell
-adb install -r Output/Release/Photos_1.5.1_Android.apk
+adb install -r Output/Release/Photos_1.6.0_Android.apk
 ```
 
 ### 3. Verifying APK Integrity (SHA-256)
 Every release includes a `.sha256` checksum file alongside the APK in [`Output/Release/`](Output/Release/) and on GitHub Releases:
 ```powershell
-Get-FileHash Output/Release/Photos_1.5.1_Android.apk -Algorithm SHA256
+Get-FileHash Output/Release/Photos_1.6.0_Android.apk -Algorithm SHA256
 ```
 
 ---
