@@ -27,9 +27,8 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 - **Pull-to-Refresh & Folder Exclusion Manager (`HomeScreen.kt`, `MediaRepository.kt`, `PlaybackAndStudioPreferences.kt`)**:
   - **Pull-to-Refresh**: Pull down at the top of the Gallery grid, Albums view, or Music list to rescan and sync device media immediately.
   - **Exclude Folders**: Hide specific folders/albums from appearing in Gallery, Albums, Video, and Music without deleting files on disk, with a dedicated **Excluded Folders** manager sheet to restore hidden folders anytime.
-- **Interactive Before/After Slide Comparison & Multi-Photo Compare Picker (`PhotoEditorSheet.kt`, `PhotoCompareAndLoupeSheet.kt`)**:
-  - Added a draggable vertical Before/After split curtain (`< | >`) and comparison slider in both the Photo Editor (`Split` mode) and Image Viewer (`Slide` compare mode).
-  - Added per-tile **Swap** photo selection in `2-Up`, `4-Up`, and `Slide` comparison modes using `ToolMediaPickerSheet`.
+- **Multi-Photo Compare Picker (`PhotoCompareAndLoupeSheet.kt`)**:
+  - Added per-tile **Swap** photo selection in `2-Up` and `4-Up` comparison modes using `ToolMediaPickerSheet`.
 - **Pinch-to-Zoom Gallery Columns & Video Player Gestures (`HomeScreen.kt`, `VideoTheaterSheet.kt`)**:
   - Pinch with two fingers on the Home gallery grid to transition smoothly between `2`, `3`, `4`, and `5` columns.
   - Added press-and-hold temporary `2.0x` speed boost and double-tap left/right edge `±10s` seek gestures in the Video Player.
@@ -60,3 +59,9 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 ### 1.7.1 (2026-10-30)
 - **Seamless In-Place APK Upgrade Over `1.6.1` via V1 + V2 + V3 Signing Certificate Lineage (`app/build.gradle.kts`, `PhotosLineage.bin`)**:
   - Fixed `"Aplikasi tidak terinstal"` (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) when installing over `Photos 1.6.1` or earlier by signing the release APK with APK Signature Scheme `v1`, `v2`, and `v3` (`--rotation-min-sdk-version 28`, `--set-installed-data true`, `--set-rollback true`), cryptographically linking the legacy `1.0.0–1.6.1` signing certificate (`5B:20:35:30...`) to the dedicated Arinara release keystore (`PhotosRelease.jks`, `AE:23:79:22...`) so existing installations upgrade in-place without uninstalling or losing user data.
+
+### 1.7.2 (2026-10-30)
+- **1-Tap Lyric Cast Shutdown & Active Socket Cleanup (`AudiophilePlayerSheet.kt`, `LyricCastServer.kt`)**:
+  - Fixed an issue where Lyric Cast could not be easily shut down (tapping the bottom `Casting` chip or `•••` menu only toggled the QR panel, and closing the panel via the bottom chip restarted the server). Tapping **Stop Cast** on the bottom bar, inside the Cast card, or in the `•••` menu now immediately stops `LyricCastServer`, closes all active client sockets, and dismisses the Cast card in a single tap.
+- **Delete Photo `Slide` / Split Curtain Feature (`PhotoCompareAndLoupeSheet.kt`, `PhotoEditorSheet.kt`)**:
+  - Removed the `Slide` (`COMPARE_SLIDE`) comparison mode and split slider from the Photo Viewer and removed the Before/After `Split` curtain from the Photo Editor.
