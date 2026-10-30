@@ -55,3 +55,8 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 - **Bounded `2-Up` / `4-Up` Compare Zoom & Video Editor Background Audio Isolation (`PhotoCompareAndLoupeSheet.kt`, `VideoEditorSheet.kt`, `HomeScreen.kt`)**:
   - Enforced strict cell clipping (`clipToBounds()`) and independent per-image zoom/pan when `Sync` is off in `2-Up` and `4-Up` compare modes.
   - Fixed background audio or video playback continuing when opening `VideoEditorSheet` by pausing active players on editor launch and initializing the editor preview in a paused state.
+
+## Patches
+### 1.7.1 (2026-10-30)
+- **Seamless In-Place APK Upgrade Over `1.6.1` via V1 + V2 + V3 Signing Certificate Lineage (`app/build.gradle.kts`, `PhotosLineage.bin`)**:
+  - Fixed `"Aplikasi tidak terinstal"` (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) when installing over `Photos 1.6.1` or earlier by signing the release APK with APK Signature Scheme `v1`, `v2`, and `v3` (`--rotation-min-sdk-version 28`, `--set-installed-data true`, `--set-rollback true`), cryptographically linking the legacy `1.0.0–1.6.1` signing certificate (`5B:20:35:30...`) to the dedicated Arinara release keystore (`PhotosRelease.jks`, `AE:23:79:22...`) so existing installations upgrade in-place without uninstalling or losing user data.
