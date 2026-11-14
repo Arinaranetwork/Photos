@@ -20,7 +20,7 @@ written consent from Arinara Network as sole legal owner of this codebase. -->
 
 <br />
 
-<img src="Assets/Banners/PhotosBanner_1.7.2_2026-10-30.png" alt="Photos 1.7.2 Banner" width="100%" />
+<img src="Assets/Banners/PhotosBanner_1.8.0_2026-11-14.png" alt="Photos 1.8.0 Banner" width="100%" />
 
 <p align="center">
   <i>Built on the borderless Arinara Electric Slate design system (#0D1117 canvas, #161C26 surfaces, #7A5AF8 electric violet) with universal spring physics and zero cloud telemetry.</i>
@@ -74,10 +74,10 @@ Instead of splitting workflows across separate gallery viewers, photo editors, v
 - **Hardware-Accelerated 10-Band EQ (`31 Hz – 16 kHz`)**: Powered by Android API 28+ `DynamicsProcessing` (`PreEq` + `PostEq` + Preamp gain) paired with hardware `Equalizer`, `BassBoost`, `Virtualizer`, Headphone Crossfeed, and `+15 dB` `LoudnessEnhancer`.
 - **Live 60fps FFT Spectrum & Biquad Response Graph**: Overlays real-time hardware `Visualizer` FFT frequency bars directly behind a 96-point cascaded RBJ Biquad frequency response curve (`20 Hz – 20 kHz`), alongside a scrolling 2D time-frequency **Waterfall Spectrogram** to verify true lossless high-frequency extension.
 
-### 🎵 Audiophile Music Player, 5 Multi-Queues & Synced `.LRC` Lyrics
+### 🎵 Audiophile Music Player, 5 Multi-Queues & Synced Lyrics
 - **Lossless & High-Res Audio Engine**: Native gapless playback for `FLAC`, `WAV`, `ALAC`, `MP3`, `AAC/M4A`, `OGG`, and `Opus` with a bit-perfect Signal Path inspector and `.CUE` sheet track splitter.
 - **5 Independent Persistent Queue Slots**: Switch seamlessly between 5 saved listening queues—each remembering its exact track list, shuffle state, and millisecond playback position—plus a 4-state Loop selector (`Off`, `Queue`, `Track`, `A–B Section Loop`).
-- **Auto-Scrolling `.LRC` Lyrics & Real-Time Stamper**: Auto-centers the active timestamped lyric line with tap-to-seek navigation, includes an interactive in-app **`.LRC` Timestamp Stamper** (`[mm:ss.xx]`) for creating synced lyrics while listening, and provides a **Sleep Timer** with a smooth 30-second volume fade-out.
+- **Auto-Scrolling Word-Timed & Classic Lyrics (`Edit Lrc`)**: Auto-centers the active timestamped lyric line with word-accurate vocal sweep highlighting, tap-to-seek navigation, an interactive **`Edit Lrc`** timeline/raw editor supporting both `version: '1.0'` YAML word-timed lyrics and classic `[mm:ss.xx]` format, plus a **Sleep Timer** with a smooth 30-second volume fade-out.
 
 ### 🔐 Deep EXIF Inspector & Private PIN Vault
 - **Forensic Metadata & Integrity**: Inspect camera body, lens, shutter speed, ISO, aperture, color space, live 256-bin RGB histogram, and cryptographic `SHA-256` file checksums.
@@ -93,7 +93,7 @@ Instead of splitting workflows across separate gallery viewers, photo editors, v
 | **Photos & RAW** | `JPEG`, `PNG`, `WebP`, `HEIC`, `HEIF`, `AVIF`, `GIF`, `BMP`, `SVG`, `DNG`, `CR2`, `NEF`, `ARW` | 10-Module 60fps Darkroom, `800%` Zoom, `2-Up`/`4-Up` Sync Compare, EXIF Scrubber |
 | **Video & Cinema** | `MP4`, `MKV`, `WebM`, `MOV`, `AVI`, `TS` (`H.264/AVC`, `H.265/HEVC`, `VP9`, `AV1`) | Native Aspect Ratio, Persistent System PiP, Live Quality/FPS Switcher, On-Demand Transcoder |
 | **Music & Audio** | `FLAC`, `WAV`, `ALAC`, `MP3`, `M4A`, `AAC`, `OGG`, `Opus` | 10-Band Hardware EQ, Live FFT & Waterfall Spectrogram, 5 Saved Queues, Video-to-MP3 Extractor |
-| **Lyrics & Subtitles** | `.LRC` (Synced Lyrics), `.SRT`, `.VTT`, `.ASS` / `.SSA`, `.CUE` | Auto-Scrolling `.LRC` Viewer & Real-Time Stamper, Dual Subtitles, Clickable Transcript Search |
+| **Lyrics & Subtitles** | Synced Lyrics (`[mm:ss.xx]` & YAML `version: '1.0'`), `.SRT`, `.VTT`, `.ASS` / `.SSA`, `.CUE` | Word-Timed Vocal Sweep & **`Edit Lrc`** Timeline/Raw Editor, Dual Subtitles, Clickable Transcript Search |
 
 ---
 
@@ -103,7 +103,8 @@ All official compiled Android packages (`APK`) and their `SHA-256` verification 
 
 | Version | Channel | Release Artifact | Highlights |
 |:---|:---|:---|:---|
-| **`v1.7.2`** *(Latest)* | **Stable / Beta** | [`Photos_1.7.2_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.2-Beta/Photos_1.7.2_Android.apk)<br/>[`Photos_1.7.2_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.2-Beta/Photos_1.7.2_Beta_Android.apk) | Hotfix for 1-Tap Lyric Cast shutdown (`Stop Cast` on bottom pill bar, Cast card header, and `•••` menu immediately stops `LyricCastServer`, closes connected client sockets, and dismisses the panel without restarting) and removal of the photo `Slide` / split-curtain comparison mode |
+| **`v1.8.0`** *(Latest)* | **Beta** | [`Photos_1.8.0_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.8.0-Beta/Photos_1.8.0_Beta_Android.apk) | Overhauled **`Edit Lrc`** timeline & raw lyric editor (`Lines` + `Text` modes, live transport/stamping, `±100ms` fine tuning, metadata fields, `v1.0` <-> `Classic` conversion) and full support for the `version: '1.0'` YAML word-timed lyric format (`metadata`, `lines`, `words`, `plain: |-`) with word-accurate vocal sweep highlighting |
+| **`v1.7.2`** | **Beta** | [`Photos_1.7.2_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.2-Beta/Photos_1.7.2_Android.apk)<br/>[`Photos_1.7.2_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.2-Beta/Photos_1.7.2_Beta_Android.apk) | Hotfix for 1-Tap Lyric Cast shutdown (`Stop Cast` on bottom pill bar, Cast card header, and `•••` menu immediately stops `LyricCastServer`, closes connected client sockets, and dismisses the panel without restarting) and removal of the photo `Slide` / split-curtain comparison mode |
 | **`v1.7.1`** | **Stable / Beta** | [`Photos_1.7.1_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.1-Beta/Photos_1.7.1_Android.apk)<br/>[`Photos_1.7.1_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.1-Beta/Photos_1.7.1_Beta_Android.apk) | Hotfix for seamless in-place APK upgrade over `v1.6.1` and earlier (`v1`+`v2`+`v3` `SigningCertificateLineage` with `installed-data` & `rollback` capabilities fixing `"Aplikasi tidak terinstal"` / `INSTALL_FAILED_UPDATE_INCOMPATIBLE`), plus all `v1.7.0` Lyric Cast, 64-Bit Pro Remix FX, 3-Tier Audio Power Plan, `.ZIP` Audio+Lyric Bundle, and Streamlined Loop Notification features |
 | **`v1.7.0`** | **Stable / Beta** | [`Photos_1.7.0_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.0-Beta/Photos_1.7.0_Android.apk)<br/>[`Photos_1.7.0_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.0-Beta/Photos_1.7.0_Beta_Android.apk) | Zero-Config Music Lyric Casting (`LyricCastServer` LAN 16:9 Web Stage with QR Code + Native External Display `Presentation` mode), 64-Bit Pro Remix & Spatial Audio DSP Engine (Stereo Studio Reverb, Vocal/Instrumental Stem Slider, 8D Binaural Orbit, Resonant Muffle/Radio Sweep Filter, Transient Punch & Sub-Octave Synth with full Preset save/load), 3-Tier Audio Power Plan (`Max`, `Medium`, `Efficient` non-destructive effect bypass), Crunch-Free & Alias-Free EQ + Pitch Pipeline, Single & Batch Audio + `.LRC` `.ZIP` Bundle Export/Import, Heavily Blurred Album Cover Backdrop & Slide-Down Player Handle, Streamlined `Loop` (`Off`/`1x`/`2x`/`3x`/`5x`/`∞`/`ALL`) Audio Notification, Pull-to-Refresh, Exclude Folders Manager, Dedicated Full-Screen Native-Aspect PDF Reader, Pinch-to-Zoom Gallery Columns (`2..5`), and Video Hold-for-`2x` & Double-Tap `±10s` Seek |
 | **`v1.6.1`** | **Stable / Beta** | [`Photos_1.6.1_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.6.1/Photos_1.6.1_Android.apk)<br/>[`Photos_1.6.1_Beta_Android.apk`](https://github.com/Arinaranetwork/Photos/releases/download/v1.6.1/Photos_1.6.1_Beta_Android.apk) | Hotfix for Synced Lyrics Progressive Optical Blur (`MultiQueueManager.gaussianBlurSingleColorArgb` + `ProgressiveBlurredLyricItem` with zero-padded `3 * r + 6` margins, `1.0f..1.25f` optical energy compensation, calibrated full/half-res `tier = 1..6` Gaussian radii, pre-warmed `420ms` active/inactive crossfade, and staggered `Dispatchers.Default` updates so inactive lyrics never vanish and never clip into rectangular boxes), plus all `v1.6.0` Unified Visual Tool Media Picker, Per-Image Rotation & Custom Background Color, and Real-Time OpenGL ES 2.0 Video Color Grading features |
@@ -121,27 +122,27 @@ All official compiled Android packages (`APK`) and their `SHA-256` verification 
 | **`v1.1.1`** | **Beta / Stable** | [`Photos_1.1.1_Beta_Android.apk`](Output/Release/Photos_1.1.1_Beta_Android.apk)<br/>[`Photos_1.1.1_Android.apk`](Output/Release/Photos_1.1.1_Android.apk) | Updated dual-mountain emblem launcher icon across all adaptive and legacy densities |
 | **`v1.1.0`** | **Beta / Stable** | [`Photos_1.1.0_Beta_Android.apk`](Output/Release/Photos_1.1.0_Beta_Android.apk)<br/>[`Photos_1.1.0_Android.apk`](Output/Release/Photos_1.1.0_Android.apk) | Gesture image swiping (`Prev`/`Next` & swipe-to-dismiss) and 10-module / 70+ parameter Pro Photo Editor |
 
-Full release notes are available in [`Changelog/Changelog_1.7.md`](Changelog/Changelog_1.7.md), [`Changelog/Changelog_1.6.md`](Changelog/Changelog_1.6.md), [`Changelog/Changelog_1.5.md`](Changelog/Changelog_1.5.md), [`Changelog/Changelog_1.4.md`](Changelog/Changelog_1.4.md), [`Changelog/Changelog_1.3.md`](Changelog/Changelog_1.3.md), [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
+Full release notes are available in [`Changelog/Changelog_1.8.md`](Changelog/Changelog_1.8.md), [`Changelog/Changelog_1.7.md`](Changelog/Changelog_1.7.md), [`Changelog/Changelog_1.6.md`](Changelog/Changelog_1.6.md), [`Changelog/Changelog_1.5.md`](Changelog/Changelog_1.5.md), [`Changelog/Changelog_1.4.md`](Changelog/Changelog_1.4.md), [`Changelog/Changelog_1.3.md`](Changelog/Changelog_1.3.md), [`Changelog/Changelog_1.2.md`](Changelog/Changelog_1.2.md), [`Changelog/Changelog_1.1.md`](Changelog/Changelog_1.1.md), and [`Changelog/Changelog_1.0.md`](Changelog/Changelog_1.0.md).
 
 ---
 
 ## Installation & Verification
 
 ### 1. Direct Installation on Android
-1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or download [**`Photos_1.7.2_Android.apk`**](https://github.com/Arinaranetwork/Photos/releases/download/v1.7.2-Beta/Photos_1.7.2_Android.apk) directly.
+1. Visit the [**Releases**](https://github.com/Arinaranetwork/Photos/releases) page or download [**`Photos_1.8.0_Beta_Android.apk`**](https://github.com/Arinaranetwork/Photos/releases/download/v1.8.0-Beta/Photos_1.8.0_Beta_Android.apk) directly.
 2. Open the downloaded `.apk` file on your Android device (requires **Android 7.0 Nougat / API 24** or newer).
 3. If prompted by Android, allow installation from your browser or file manager.
 4. Launch **Photos** and grant local media permissions (`Photos & Videos` and `Music & Audio`) to index your on-device library immediately.
 
 ### 2. Optional ADB Installation
 ```powershell
-adb install -r Output/Release/Photos_1.7.2_Android.apk
+adb install -r Output/Release/Photos_1.8.0_Beta_Android.apk
 ```
 
 ### 3. Verifying APK Integrity (SHA-256)
 Every release includes a `.sha256` checksum file alongside the APK in [`Output/Release/`](Output/Release/) and on GitHub Releases:
 ```powershell
-Get-FileHash Output/Release/Photos_1.7.2_Android.apk -Algorithm SHA256
+Get-FileHash Output/Release/Photos_1.8.0_Beta_Android.apk -Algorithm SHA256
 ```
 
 ---
